@@ -38,6 +38,10 @@ android {
     }
 }
 
+dependencies {
+    implementation("com.android.tools.build:apksig:9.1.0")
+}
+
 kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17

@@ -9,6 +9,7 @@ import '../../data/sample_data/sample_projects.dart';
 import '../../data/services/apk_analyzer_service.dart';
 import '../../data/services/dialog_scanner_service.dart';
 import '../../data/services/patch_service.dart';
+import '../../data/services/apk_build_pipeline.dart';
 
 class AppState extends ChangeNotifier {
   final ApkAnalyzerService _analyzerService = ApkAnalyzerService();
@@ -18,6 +19,7 @@ class AppState extends ChangeNotifier {
   ApkProject _currentProject = SampleProjects.antiAdwareProject;
   int _selectedNavIndex = 0; // 0 = Projects / Dashboard
 
+  Uint8List? _originalApkBytes;
   bool _isAnalyzing = false;
   int _currentProgressPercent = 0;
   String _currentStage = '';
@@ -64,6 +66,7 @@ class AppState extends ChangeNotifier {
   List<AnalysisLog> get liveLogs => _isAnalyzing ? _liveLogs : _currentProject.logs;
   String get customOutputDirectory => _customOutputDirectory;
   DialogOnlyReport? get dialogReport => _dialogReport;
+  Uint8List? get originalApkBytes => _originalApkBytes;
 
   void setOutputDirectory(String dir) {
     if (dir.trim().isNotEmpty) {
@@ -129,6 +132,7 @@ class AppState extends ChangeNotifier {
     required String fileName,
     required Uint8List bytes,
   }) async {
+    _originalApkBytes = bytes;
     _isAnalyzing = true;
     _currentProgressPercent = 0;
     _currentStage = 'Starting APK Pipeline...';
@@ -213,11 +217,16 @@ class AppState extends ChangeNotifier {
   }
 
   // Patching
-  Future<PatchResult> applyPatch(PatchCandidate candidate) async {
+  Future<PatchResult> applyPatch(
+    PatchCandidate candidate, {
+    void Function(BuildProgress)? onProgress,
+  }) async {
     final result = await PatchService.applyPatch(
       project: _currentProject,
       candidate: candidate,
+      originalBytes: _originalApkBytes,
       customOutputDirectory: _customOutputDirectory,
+      onProgress: onProgress,
     );
 
     if (result.success) {
@@ -232,7 +241,9 @@ class AppState extends ChangeNotifier {
   }
 
   /// Batch patch all detected dialog box candidates in one operation
-  Future<PatchResult> batchApplyDialogPatches() async {
+  Future<PatchResult> batchApplyDialogPatches({
+    void Function(BuildProgress)? onProgress,
+  }) async {
     final unapplied = _currentProject.patchCandidates.where((c) => !c.isApplied).toList();
     if (unapplied.isEmpty) {
       return PatchResult(
@@ -245,7 +256,9 @@ class AppState extends ChangeNotifier {
     final result = await PatchService.batchApplyPatches(
       project: _currentProject,
       candidates: unapplied,
+      originalBytes: _originalApkBytes,
       customOutputDirectory: _customOutputDirectory,
+      onProgress: onProgress,
     );
 
     if (result.success) {
@@ -262,7 +275,9 @@ class AppState extends ChangeNotifier {
   /// Selectively kills ONLY the reverse-engineer injected credit dialogue,
   /// preserving all authentic app dialogues (Rate Us, Confirmations, Progress, etc.).
   /// Rebuilds the modified APK into [customOutputDirectory].
-  Future<PatchResult> killInjectedCreditDialogsOnly() async {
+  Future<PatchResult> killInjectedCreditDialogsOnly({
+    void Function(BuildProgress)? onProgress,
+  }) async {
     final creditFindings = _currentProject.dialogFindings.where((f) => f.isInjectedCreditDialog).toList();
     if (creditFindings.isEmpty) {
       return PatchResult(
@@ -276,7 +291,9 @@ class AppState extends ChangeNotifier {
     final result = await PatchService.batchApplyPatches(
       project: _currentProject,
       candidates: creditCandidates,
+      originalBytes: _originalApkBytes,
       customOutputDirectory: _customOutputDirectory,
+      onProgress: onProgress,
     );
 
     if (result.success) {
@@ -292,7 +309,10 @@ class AppState extends ChangeNotifier {
 
   /// Selectively kills a single dialogue finding by creating a targeted patch candidate
   /// and rebuilding the APK into [customOutputDirectory].
-  Future<PatchResult> killSingleDialogFinding(DialogFinding finding) async {
+  Future<PatchResult> killSingleDialogFinding(
+    DialogFinding finding, {
+    void Function(BuildProgress)? onProgress,
+  }) async {
     final candidates = DialogScannerService.generatePatchCandidatesForFindings([finding]);
     if (candidates.isEmpty) {
       return PatchResult(
@@ -303,7 +323,7 @@ class AppState extends ChangeNotifier {
     }
 
     final candidate = candidates.first;
-    return applyPatch(candidate);
+    return applyPatch(candidate, onProgress: onProgress);
   }
 
   Future<PatchResult> revertPatch(PatchCandidate candidate) async {
@@ -324,10 +344,14 @@ class AppState extends ChangeNotifier {
   }
 
   /// Rebuilds and exports the current project with all active patches into [customOutputDirectory]
-  Future<PatchResult> rebuildAndExportPatchedApk() async {
+  Future<PatchResult> rebuildAndExportPatchedApk({
+    void Function(BuildProgress)? onProgress,
+  }) async {
     final result = await PatchService.rebuildAndExportApk(
       project: _currentProject,
+      originalBytes: _originalApkBytes,
       customOutputDirectory: _customOutputDirectory,
+      onProgress: onProgress,
     );
 
     if (result.success) {

@@ -6,6 +6,7 @@ import '../../domain/models/patch_candidate.dart';
 import '../state/app_state.dart';
 import '../widgets/diff_viewer.dart';
 import '../widgets/status_badge.dart';
+import '../widgets/build_pipeline_dialog.dart';
 
 class PatchCenterScreen extends StatefulWidget {
   const PatchCenterScreen({super.key});
@@ -17,50 +18,17 @@ class PatchCenterScreen extends StatefulWidget {
 class _PatchCenterScreenState extends State<PatchCenterScreen> {
   PatchCandidate? _previewCandidate;
 
-  void _applyPatch(BuildContext context, PatchCandidate candidate) async {
+  void _applyPatch(BuildContext context, PatchCandidate candidate) {
     final appState = context.read<AppState>();
-    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    setState(() {
+      _previewCandidate = null;
+    });
 
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(
-        child: Card(
-          color: AppColors.surface,
-          child: Padding(
-            padding: EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                CircularProgressIndicator(color: AppColors.primary),
-                SizedBox(height: 16),
-                Text('Creating backup & applying Smali patch...'),
-                SizedBox(height: 4),
-                Text('Rebuilding APK & signing with v2/v3 scheme...', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-              ],
-            ),
-          ),
-        ),
-      ),
+    BuildPipelineDialog.show(
+      context,
+      title: 'Applying Patch: ${candidate.targetName}',
+      runAction: (onProgress) => appState.applyPatch(candidate, onProgress: onProgress),
     );
-
-    await Future.delayed(const Duration(milliseconds: 1200));
-    final result = await appState.applyPatch(candidate);
-
-    if (context.mounted) {
-      Navigator.pop(context); // close loading dialog
-      setState(() {
-        _previewCandidate = null;
-      });
-
-      scaffoldMessenger.showSnackBar(
-        SnackBar(
-          content: Text(result.message),
-          backgroundColor: result.success ? AppColors.success : AppColors.danger,
-          duration: const Duration(seconds: 4),
-        ),
-      );
-    }
   }
 
   void _revertPatch(BuildContext context, PatchCandidate candidate) async {
@@ -80,78 +48,12 @@ class _PatchCenterScreenState extends State<PatchCenterScreen> {
     );
   }
 
-  void _rebuildAndExportApk(BuildContext context, AppState appState) async {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(
-        child: Card(
-          color: AppColors.surface,
-          child: Padding(
-            padding: EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                CircularProgressIndicator(color: AppColors.success),
-                SizedBox(height: 16),
-                Text('Rebuilding patched APK...'),
-                SizedBox(height: 4),
-                Text('Signing with v2/v3 scheme & saving to storage...', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-              ],
-            ),
-          ),
-        ),
-      ),
+  void _rebuildAndExportApk(BuildContext context, AppState appState) {
+    BuildPipelineDialog.show(
+      context,
+      title: 'Rebuilding & Signing Patched APK',
+      runAction: (onProgress) => appState.rebuildAndExportPatchedApk(onProgress: onProgress),
     );
-
-    final result = await appState.rebuildAndExportPatchedApk();
-
-    if (context.mounted) {
-      Navigator.pop(context); // close loading
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: AppColors.surface,
-          title: Row(
-            children: [
-              Icon(result.success ? Icons.check_circle : Icons.error, color: result.success ? AppColors.success : AppColors.danger, size: 22),
-              const SizedBox(width: 8),
-              Text(result.success ? 'Patched APK Saved!' : 'Rebuild Result', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(result.message, style: const TextStyle(fontSize: 13)),
-              if (result.modifiedApkPath != null) ...[
-                const SizedBox(height: 12),
-                const Text('Saved Local Path:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.accent)),
-                const SizedBox(height: 4),
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: AppColors.card,
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: SelectableText(
-                    result.modifiedApkPath!,
-                    style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: AppColors.success),
-                  ),
-                ),
-              ],
-            ],
-          ),
-          actions: [
-            ElevatedButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
-    }
   }
 
   void _confirmClearHistory(BuildContext context, AppState appState) {

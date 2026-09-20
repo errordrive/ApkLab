@@ -6,6 +6,7 @@ import '../../data/services/dialog_scanner_service.dart';
 import '../state/app_state.dart';
 import '../widgets/relationship_graph_widget.dart';
 import '../widgets/status_badge.dart';
+import '../widgets/build_pipeline_dialog.dart';
 
 class DialogScannerScreen extends StatefulWidget {
   const DialogScannerScreen({super.key});
@@ -628,152 +629,27 @@ class _DialogScannerScreenState extends State<DialogScannerScreen> {
     );
   }
 
-  void _killInjectedCreditOnly(BuildContext context, AppState appState) async {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(
-        child: Card(
-          color: AppColors.surface,
-          child: Padding(
-            padding: EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                CircularProgressIndicator(color: AppColors.danger),
-                SizedBox(height: 16),
-                Text('Neutralizing injected reverse-engineer credit dialogue...'),
-                SizedBox(height: 4),
-                Text('Preserving authentic app dialogues & rebuilding APK...', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-              ],
-            ),
-          ),
-        ),
-      ),
+  void _killInjectedCreditOnly(BuildContext context, AppState appState) {
+    BuildPipelineDialog.show(
+      context,
+      title: 'Neutralizing Injected Credit Dialogue',
+      runAction: (onProgress) => appState.killInjectedCreditDialogsOnly(onProgress: onProgress),
     );
-
-    final result = await appState.killInjectedCreditDialogsOnly();
-
-    if (context.mounted) {
-      Navigator.pop(context); // close loading
-      _showResultDialog(context, appState, result, title: 'Credit Dialogue Neutralized');
-    }
   }
 
-  void _killSingleFinding(BuildContext context, AppState appState, DialogFinding finding) async {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => Center(
-        child: Card(
-          color: AppColors.surface,
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const CircularProgressIndicator(color: AppColors.danger),
-                const SizedBox(height: 16),
-                Text('Killing ${finding.title}...'),
-                const SizedBox(height: 4),
-                const Text('Rebuilding APK & saving to custom local folder...', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-              ],
-            ),
-          ),
-        ),
-      ),
+  void _killSingleFinding(BuildContext context, AppState appState, DialogFinding finding) {
+    BuildPipelineDialog.show(
+      context,
+      title: 'Killing ${finding.title}',
+      runAction: (onProgress) => appState.killSingleDialogFinding(finding, onProgress: onProgress),
     );
-
-    final result = await appState.killSingleDialogFinding(finding);
-
-    if (context.mounted) {
-      Navigator.pop(context); // close loading
-      _showResultDialog(context, appState, result, title: 'Dialogue Neutralized');
-    }
   }
 
-  void _autoPatchAllDialogs(BuildContext context, AppState appState) async {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(
-        child: Card(
-          color: AppColors.surface,
-          child: Padding(
-            padding: EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                CircularProgressIndicator(color: AppColors.success),
-                SizedBox(height: 16),
-                Text('Auto-patching all custom & standard dialogs...'),
-                SizedBox(height: 4),
-                Text('Rebuilding APK & saving to custom local folder...', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-
-    final result = await appState.batchApplyDialogPatches();
-
-    if (context.mounted) {
-      Navigator.pop(context); // close loading
-      _showResultDialog(context, appState, result, title: 'APK Rebuilt Successfully');
-    }
-  }
-
-  void _showResultDialog(BuildContext context, AppState appState, dynamic result, {required String title}) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: Row(
-          children: [
-            Icon(result.success ? Icons.check_circle : Icons.error, color: result.success ? AppColors.success : AppColors.danger, size: 22),
-            const SizedBox(width: 8),
-            Text(result.success ? title : 'Patch Result', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(result.message, style: const TextStyle(fontSize: 13)),
-            if (result.modifiedApkPath != null) ...[
-              const SizedBox(height: 12),
-              const Text('Saved Local Path:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.accent)),
-              const SizedBox(height: 4),
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: AppColors.card,
-                  borderRadius: BorderRadius.circular(4),
-                  border: Border.all(color: AppColors.border),
-                ),
-                child: SelectableText(
-                  result.modifiedApkPath!,
-                  style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: AppColors.success),
-                ),
-              ),
-            ],
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('OK'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              appState.setNavIndex(7); // View Patch Center history
-            },
-            child: const Text('VIEW PATCH CENTER'),
-          ),
-        ],
-      ),
+  void _autoPatchAllDialogs(BuildContext context, AppState appState) {
+    BuildPipelineDialog.show(
+      context,
+      title: 'Auto-patching All Dialogues',
+      runAction: (onProgress) => appState.batchApplyDialogPatches(onProgress: onProgress),
     );
   }
 }
