@@ -90,6 +90,75 @@ class MainActivity : FlutterActivity() {
                         result.error("INVALID_ARGS", "Path is required", null)
                     }
                 }
+                "zipalign" -> {
+                    val inputPath = call.argument<String>("inputPath")
+                    val outputPath = call.argument<String>("outputPath")
+                    if (inputPath != null && outputPath != null) {
+                        try {
+                            val res = NativePipeline.zipalignApk(inputPath, outputPath)
+                            result.success(res)
+                        } catch (e: Exception) {
+                            result.error("ZIPALIGN_ERROR", e.message, e.stackTraceToString())
+                        }
+                    } else {
+                        result.error("INVALID_ARGS", "inputPath and outputPath are required", null)
+                    }
+                }
+                "verifyZipAlignment" -> {
+                    val apkPath = call.argument<String>("apkPath")
+                    if (apkPath != null) {
+                        try {
+                            val res = NativePipeline.verifyZipAlignment(apkPath)
+                            result.success(res)
+                        } catch (e: Exception) {
+                            result.error("ALIGN_VERIFY_ERROR", e.message, e.stackTraceToString())
+                        }
+                    } else {
+                        result.error("INVALID_ARGS", "apkPath is required", null)
+                    }
+                }
+                "signApk" -> {
+                    val inputPath = call.argument<String>("inputPath")
+                    val outputPath = call.argument<String>("outputPath")
+                    val customKeystorePath = call.argument<String>("customKeystorePath")
+                    val customKeystorePass = call.argument<String>("customKeystorePass")
+                    val customKeyAlias = call.argument<String>("customKeyAlias")
+                    if (inputPath != null && outputPath != null) {
+                        try {
+                            val signResult = NativePipeline.signApk(
+                                this, inputPath, outputPath,
+                                customKeystorePath, customKeystorePass, customKeyAlias
+                            )
+                            result.success(signResult)
+                        } catch (e: Exception) {
+                            result.error("SIGN_ERROR", e.message, e.stackTraceToString())
+                        }
+                    } else {
+                        result.error("INVALID_ARGS", "inputPath and outputPath are required", null)
+                    }
+                }
+                "verifySignature" -> {
+                    val apkPath = call.argument<String>("apkPath")
+                    if (apkPath != null) {
+                        try {
+                            val res = NativePipeline.verifySignature(apkPath)
+                            result.success(res)
+                        } catch (e: Exception) {
+                            result.error("VERIFY_ERROR", e.message, e.stackTraceToString())
+                        }
+                    } else {
+                        result.error("INVALID_ARGS", "apkPath is required", null)
+                    }
+                }
+                "captureRuntimeDiagnostics" -> {
+                    val packageName = call.argument<String>("packageName") ?: ""
+                    try {
+                        val res = NativePipeline.captureRuntimeDiagnostics(packageName)
+                        result.success(res)
+                    } catch (e: Exception) {
+                        result.error("DIAGNOSTIC_ERROR", e.message, e.stackTraceToString())
+                    }
+                }
                 "signAndZipalign" -> {
                     val inputPath = call.argument<String>("inputPath")
                     val outputPath = call.argument<String>("outputPath")

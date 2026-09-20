@@ -750,18 +750,199 @@ class DexParser {
     }
   }
 
-  /// Patches a method entry to return void immediately (return-void = 0x000e)
-  void patchMethodWithReturnVoid(int insnsStartByteOffset, int totalInsnsBytes) {
-    if (totalInsnsBytes >= 2) {
-      // return-void opcode: 0x000e (little-endian: 0x0e, 0x00)
+  /// Safely neutralizes an instruction:
+  /// If followed by move-result, move-result-wide, or move-result-object,
+  /// neutralizes both the invoke and the move-result with a const/4 (or const-wide/16)
+  /// initializing the target register to 0/null to avoid ART VerifyError.
+  void patchInstructionSafely({
+    required int byteOffset,
+    required int byteLength,
+    required DexCodeItem codeItem,
+  }) {
+    // Find instruction in codeItem
+    final insnIndex = codeItem.instructions.indexWhere((i) => i.byteOffset == byteOffset);
+    if (insnIndex == -1) {
+      patchInstructionWithNop(byteOffset, byteLength);
+      return;
+    }
+
+    final currentInsn = codeItem.instructions[insnIndex];
+    final nextInsn = (insnIndex + 1 < codeItem.instructions.length)
+        ? codeItem.instructions[insnIndex + 1]
+        : null;
+
+    // Check if next instruction is move-result (0x0a), move-result-wide (0x0b), or move-result-object (0x0c)
+    if (nextInsn != null && (nextInsn.opcode == 0x0a || nextInsn.opcode == 0x0b || nextInsn.opcode == 0x0c)) {
+      final totalBytes = currentInsn.byteLength + nextInsn.byteLength;
+      final destReg = nextInsn.destRegister ?? (nextInsn.registers.isNotEmpty ? nextInsn.registers.first : 0);
+
+      if (nextInsn.opcode == 0x0b) {
+        // move-result-wide: write const-wide/16 destReg, 0 (4 bytes: 0x16, destReg, 0x00, 0x00)
+        bytes[byteOffset] = 0x16;
+        bytes[byteOffset + 1] = destReg & 0xFF;
+        bytes[byteOffset + 2] = 0x00;
+        bytes[byteOffset + 3] = 0x00;
+        for (int i = 4; i < totalBytes; i++) {
+          bytes[byteOffset + i] = 0x00;
+        }
+      } else {
+        // move-result or move-result-object: write const/4 destReg, 0 (2 bytes: 0x12, destReg)
+        if (destReg < 16) {
+          bytes[byteOffset] = 0x12;
+          bytes[byteOffset + 1] = (destReg & 0x0F) << 4; // const/4 destReg, 0
+          for (int i = 2; i < totalBytes; i++) {
+            bytes[byteOffset + i] = 0x00;
+          }
+        } else {
+          // const/16 destReg, 0 (4 bytes)
+          bytes[byteOffset] = 0x13;
+          bytes[byteOffset + 1] = destReg & 0xFF;
+          bytes[byteOffset + 2] = 0x00;
+          bytes[byteOffset + 3] = 0x00;
+          for (int i = 4; i < totalBytes; i++) {
+            bytes[byteOffset + i] = 0x00;
+          }
+        }
+      }
+    } else {
+      // Normal NOP padding
+      patchInstructionWithNop(byteOffset, byteLength);
+    }
+  }
+
+  /// Patches a method entry to return immediately with type-safety:
+  /// - Void methods: return-void (0x000e)
+  /// - Primitive methods (int, boolean, byte, char, short): const/4 v0, 0 + return v0 (0x000f)
+  /// - Wide methods (long, double): const-wide/16 v0, 0 + return-wide v0 (0x0010)
+  /// - Object / Array methods: const/4 v0, 0 + return-object v0 (0x0011)
+  /// This completely prevents ART VerifyError on startup!
+  void patchMethodSafely({
+    required int codeOffset,
+    required int insnsStartByteOffset,
+    required int totalInsnsBytes,
+    required String returnType,
+    required int registersSize,
+  }) {
+    if (totalInsnsBytes < 2) return;
+
+    if (returnType == 'V') {
+      // return-void
       bytes[insnsStartByteOffset] = 0x0e;
       bytes[insnsStartByteOffset + 1] = 0x00;
-
-      // Fill remaining code units with NOP (0x0000)
       for (int i = 2; i < totalInsnsBytes; i++) {
         bytes[insnsStartByteOffset + i] = 0x00;
       }
+    } else if (returnType == 'Z' || returnType == 'B' || returnType == 'S' || returnType == 'C' || returnType == 'I') {
+      // Ensure at least 1 register
+      if (registersSize == 0 && codeOffset + 2 <= bytes.length) {
+        _byteData.setUint16(codeOffset, 1, Endian.little);
+      }
+      if (totalInsnsBytes >= 4) {
+        // const/4 v0, 0
+        bytes[insnsStartByteOffset] = 0x12;
+        bytes[insnsStartByteOffset + 1] = 0x00;
+        // return v0
+        bytes[insnsStartByteOffset + 2] = 0x0f;
+        bytes[insnsStartByteOffset + 3] = 0x00;
+        for (int i = 4; i < totalInsnsBytes; i++) {
+          bytes[insnsStartByteOffset + i] = 0x00;
+        }
+      }
+    } else if (returnType == 'J' || returnType == 'D') {
+      // Ensure at least 2 registers
+      if (registersSize < 2 && codeOffset + 2 <= bytes.length) {
+        _byteData.setUint16(codeOffset, 2, Endian.little);
+      }
+      if (totalInsnsBytes >= 6) {
+        // const-wide/16 v0, 0
+        bytes[insnsStartByteOffset] = 0x16;
+        bytes[insnsStartByteOffset + 1] = 0x00;
+        bytes[insnsStartByteOffset + 2] = 0x00;
+        bytes[insnsStartByteOffset + 3] = 0x00;
+        // return-wide v0
+        bytes[insnsStartByteOffset + 4] = 0x10;
+        bytes[insnsStartByteOffset + 5] = 0x00;
+        for (int i = 6; i < totalInsnsBytes; i++) {
+          bytes[insnsStartByteOffset + i] = 0x00;
+        }
+      }
+    } else {
+      // Object or Array (L...; or [...])
+      if (registersSize == 0 && codeOffset + 2 <= bytes.length) {
+        _byteData.setUint16(codeOffset, 1, Endian.little);
+      }
+      if (totalInsnsBytes >= 4) {
+        // const/4 v0, 0
+        bytes[insnsStartByteOffset] = 0x12;
+        bytes[insnsStartByteOffset + 1] = 0x00;
+        // return-object v0
+        bytes[insnsStartByteOffset + 2] = 0x11;
+        bytes[insnsStartByteOffset + 3] = 0x00;
+        for (int i = 4; i < totalInsnsBytes; i++) {
+          bytes[insnsStartByteOffset + i] = 0x00;
+        }
+      }
     }
+  }
+
+  /// Patches a method entry to return void immediately (legacy wrapper)
+  void patchMethodWithReturnVoid(int insnsStartByteOffset, int totalInsnsBytes) {
+    patchMethodSafely(
+      codeOffset: 0,
+      insnsStartByteOffset: insnsStartByteOffset,
+      totalInsnsBytes: totalInsnsBytes,
+      returnType: 'V',
+      registersSize: 1,
+    );
+  }
+
+  /// Comprehensive structural validation of the DEX file
+  DexValidationResult validateDexStructure() {
+    final errors = <String>[];
+    if (bytes.length < 0x70) {
+      return DexValidationResult(isValid: false, errors: ['DEX length too short (< 112 bytes)']);
+    }
+    // Check magic
+    if (bytes[0] != 0x64 || bytes[1] != 0x65 || bytes[2] != 0x78 || bytes[3] != 0x0a) {
+      errors.add('Invalid DEX magic bytes');
+    }
+    // Check Adler-32
+    final expectedAdler = _byteData.getUint32(8, Endian.little);
+    final actualAdler = _computeAdler32(bytes, 12, bytes.length - 12);
+    if (expectedAdler != actualAdler) {
+      errors.add('Adler-32 checksum mismatch: expected 0x${expectedAdler.toRadixString(16)}, got 0x${actualAdler.toRadixString(16)}');
+    }
+    // Check SHA-1
+    final expectedSha1 = bytes.sublist(12, 32);
+    final actualSha1 = sha1.convert(bytes.sublist(32)).bytes;
+    for (int i = 0; i < 20; i++) {
+      if (expectedSha1[i] != actualSha1[i]) {
+        errors.add('SHA-1 signature mismatch in DEX header');
+        break;
+      }
+    }
+    // Validate classes and methods can be traversed
+    try {
+      for (final cls in classes) {
+        for (final m in cls.allMethods) {
+          if (!m.hasCode) continue;
+          final code = m.codeItem!;
+          if (code.insnsOffset + code.insnsSize * 2 > bytes.length) {
+            errors.add('Method ${cls.className}->${m.methodRef.methodName} instructions overflow DEX bounds');
+          }
+        }
+      }
+    } catch (e) {
+      errors.add('Exception validating classes and methods: $e');
+    }
+
+    return DexValidationResult(
+      isValid: errors.isEmpty,
+      errors: errors,
+      classesCount: classes.length,
+      methodsCount: methods.length,
+      stringsCount: strings.length,
+    );
   }
 
   /// Recalculates the Adler-32 checksum and SHA-1 signature in the DEX header
@@ -819,6 +1000,22 @@ class DexParser {
     }
     return _UlebResult(value: result, nextOffset: cur);
   }
+}
+
+class DexValidationResult {
+  final bool isValid;
+  final List<String> errors;
+  final int classesCount;
+  final int methodsCount;
+  final int stringsCount;
+
+  const DexValidationResult({
+    required this.isValid,
+    this.errors = const [],
+    this.classesCount = 0,
+    this.methodsCount = 0,
+    this.stringsCount = 0,
+  });
 }
 
 class _UlebResult {

@@ -4,6 +4,7 @@ import '../../domain/models/patch_candidate.dart';
 import '../../domain/models/project.dart';
 import '../../domain/models/smali_info.dart';
 import 'apk_build_pipeline.dart';
+import 'apk_validator.dart';
 
 class PatchResult {
   final bool success;
@@ -15,6 +16,10 @@ class PatchResult {
   final String? error;
   final String? stackTrace;
   final List<String> completedStages;
+  final ValidationReport? validationReport;
+  final String? workspacePath;
+  final String? signerInfo;
+  final Map<String, dynamic>? runtimeDiagnostics;
 
   const PatchResult({
     required this.success,
@@ -26,6 +31,10 @@ class PatchResult {
     this.error,
     this.stackTrace,
     this.completedStages = const [],
+    this.validationReport,
+    this.workspacePath,
+    this.signerInfo,
+    this.runtimeDiagnostics,
   });
 }
 
@@ -92,6 +101,10 @@ class PatchService {
           error: buildResult.error,
           stackTrace: buildResult.stackTrace,
           completedStages: buildResult.completedStages,
+          validationReport: buildResult.validationReport,
+          workspacePath: buildResult.workspacePath,
+          signerInfo: buildResult.signerInfo,
+          runtimeDiagnostics: buildResult.runtimeDiagnostics,
           updatedProject: project,
         );
       }
@@ -130,11 +143,18 @@ class PatchService {
         'Analyze DEX/Smali',
         'Apply patch',
         'Rebuild APK',
+        'Structural validation',
+        'DEX validation',
         'Zipalign',
         'Sign APK',
+        'Signature verification',
         'Export through SAF',
         'Verify exported APK',
       ],
+      validationReport: buildResult?.validationReport,
+      workspacePath: buildResult?.workspacePath,
+      signerInfo: buildResult?.signerInfo,
+      runtimeDiagnostics: buildResult?.runtimeDiagnostics,
       updatedProject: updatedProject,
     );
   }
@@ -197,6 +217,10 @@ class PatchService {
           error: buildResult.error,
           stackTrace: buildResult.stackTrace,
           completedStages: buildResult.completedStages,
+          validationReport: buildResult.validationReport,
+          workspacePath: buildResult.workspacePath,
+          signerInfo: buildResult.signerInfo,
+          runtimeDiagnostics: buildResult.runtimeDiagnostics,
           updatedProject: project,
         );
       }
@@ -235,11 +259,18 @@ class PatchService {
         'Analyze DEX/Smali',
         'Apply patch',
         'Rebuild APK',
+        'Structural validation',
+        'DEX validation',
         'Zipalign',
         'Sign APK',
+        'Signature verification',
         'Export through SAF',
         'Verify exported APK',
       ],
+      validationReport: buildResult?.validationReport,
+      workspacePath: buildResult?.workspacePath,
+      signerInfo: buildResult?.signerInfo,
+      runtimeDiagnostics: buildResult?.runtimeDiagnostics,
       updatedProject: updatedProject,
     );
   }
@@ -324,6 +355,10 @@ class PatchService {
           error: buildResult.error,
           stackTrace: buildResult.stackTrace,
           completedStages: buildResult.completedStages,
+          validationReport: buildResult.validationReport,
+          workspacePath: buildResult.workspacePath,
+          signerInfo: buildResult.signerInfo,
+          runtimeDiagnostics: buildResult.runtimeDiagnostics,
           updatedProject: project,
         );
       }
@@ -359,11 +394,18 @@ class PatchService {
         'Analyze DEX/Smali',
         'Apply patch',
         'Rebuild APK',
+        'Structural validation',
+        'DEX validation',
         'Zipalign',
         'Sign APK',
+        'Signature verification',
         'Export through SAF',
         'Verify exported APK',
       ],
+      validationReport: buildResult?.validationReport,
+      workspacePath: buildResult?.workspacePath,
+      signerInfo: buildResult?.signerInfo,
+      runtimeDiagnostics: buildResult?.runtimeDiagnostics,
       updatedProject: updatedProject,
     );
   }
