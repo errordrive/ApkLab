@@ -23,7 +23,7 @@ class AppState extends ChangeNotifier {
   String _currentStage = '';
   List<AnalysisLog> _liveLogs = [];
 
-  String _customOutputDirectory = '/root/ApkLab/output_apks';
+  String _customOutputDirectory = '/storage/emulated/0';
   DialogOnlyReport? _dialogReport;
 
   AppState() {
@@ -321,6 +321,34 @@ class AppState extends ChangeNotifier {
       notifyListeners();
     }
     return result;
+  }
+
+  /// Rebuilds and exports the current project with all active patches into [customOutputDirectory]
+  Future<PatchResult> rebuildAndExportPatchedApk() async {
+    final result = await PatchService.rebuildAndExportApk(
+      project: _currentProject,
+      customOutputDirectory: _customOutputDirectory,
+    );
+
+    if (result.success) {
+      _currentProject = result.updatedProject;
+      final idx = _projects.indexWhere((p) => p.id == _currentProject.id);
+      if (idx != -1) {
+        _projects[idx] = _currentProject;
+      }
+      notifyListeners();
+    }
+    return result;
+  }
+
+  /// Clears the patch history & audit log for the current project
+  void clearPatchHistory() {
+    _currentProject = _currentProject.copyWith(patchHistory: []);
+    final idx = _projects.indexWhere((p) => p.id == _currentProject.id);
+    if (idx != -1) {
+      _projects[idx] = _currentProject;
+    }
+    notifyListeners();
   }
 
   /// Clean up cache, temp decompilation files, and release junk storage

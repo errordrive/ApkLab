@@ -80,6 +80,121 @@ class _PatchCenterScreenState extends State<PatchCenterScreen> {
     );
   }
 
+  void _rebuildAndExportApk(BuildContext context, AppState appState) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: Card(
+          color: AppColors.surface,
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(color: AppColors.success),
+                SizedBox(height: 16),
+                Text('Rebuilding patched APK...'),
+                SizedBox(height: 4),
+                Text('Signing with v2/v3 scheme & saving to storage...', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final result = await appState.rebuildAndExportPatchedApk();
+
+    if (context.mounted) {
+      Navigator.pop(context); // close loading
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: Row(
+            children: [
+              Icon(result.success ? Icons.check_circle : Icons.error, color: result.success ? AppColors.success : AppColors.danger, size: 22),
+              const SizedBox(width: 8),
+              Text(result.success ? 'Patched APK Saved!' : 'Rebuild Result', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(result.message, style: const TextStyle(fontSize: 13)),
+              if (result.modifiedApkPath != null) ...[
+                const SizedBox(height: 12),
+                const Text('Saved Local Path:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.accent)),
+                const SizedBox(height: 4),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppColors.card,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: SelectableText(
+                    result.modifiedApkPath!,
+                    style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: AppColors.success),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  void _confirmClearHistory(BuildContext context, AppState appState) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Row(
+          children: [
+            Icon(Icons.delete_sweep, color: AppColors.danger, size: 20),
+            SizedBox(width: 8),
+            Text('Delete Patch History', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: const Text(
+          'Are you sure you want to delete all patch history and audit logs? This action cannot be undone.',
+          style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('CANCEL'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              appState.clearPatchHistory();
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Patch history & audit log deleted.'),
+                  backgroundColor: AppColors.info,
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
+            child: const Text('DELETE HISTORY'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
@@ -158,13 +273,30 @@ class _PatchCenterScreenState extends State<PatchCenterScreen> {
                   ),
                 ],
               ),
-              OutlinedButton.icon(
-                onPressed: () => _showEditFolderDialog(context, appState),
-                icon: const Icon(Icons.edit, size: 13),
-                label: const Text('CHANGE FOLDER', style: TextStyle(fontSize: 11)),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                ),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: () => _showEditFolderDialog(context, appState),
+                    icon: const Icon(Icons.edit, size: 13),
+                    label: const Text('CHANGE FOLDER', style: TextStyle(fontSize: 11)),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    ),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: () => _rebuildAndExportApk(context, appState),
+                    icon: const Icon(Icons.save_alt, size: 14),
+                    label: const Text('SAVE / REBUILD APK', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.success,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -179,7 +311,18 @@ class _PatchCenterScreenState extends State<PatchCenterScreen> {
               ...candidates.map((candidate) => _buildCandidateCard(context, candidate)),
               const SizedBox(height: 24),
 
-              _buildSectionHeader('Patch History & Audit Log (${history.length})'),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  _buildSectionHeader('Patch History & Audit Log (${history.length})'),
+                  if (history.isNotEmpty)
+                    TextButton.icon(
+                      onPressed: () => _confirmClearHistory(context, appState),
+                      icon: const Icon(Icons.delete_sweep, size: 15, color: AppColors.danger),
+                      label: const Text('DELETE HISTORY', style: TextStyle(fontSize: 11, color: AppColors.danger, fontWeight: FontWeight.bold)),
+                    ),
+                ],
+              ),
               _buildHistoryCard(history),
             ],
           ),

@@ -18,8 +18,8 @@ class PatchResult {
 }
 
 class PatchService {
-  /// Default output directory for rebuilt APKs
-  static const String defaultOutputDirectory = '/root/ApkLab/output_apks';
+  /// Default output directory for rebuilt APKs on Android storage
+  static const String defaultOutputDirectory = '/storage/emulated/0';
 
   /// Applies a patch candidate with mandatory backup, smali modification,
   /// rebuild, and signing simulation into a custom local folder.
@@ -28,9 +28,10 @@ class PatchService {
     required PatchCandidate candidate,
     String? customOutputDirectory,
   }) async {
-    final outDir = (customOutputDirectory != null && customOutputDirectory.trim().isNotEmpty)
+    final rawDir = (customOutputDirectory != null && customOutputDirectory.trim().isNotEmpty)
         ? customOutputDirectory.trim()
         : defaultOutputDirectory;
+    final outDir = rawDir.endsWith('/') ? rawDir.substring(0, rawDir.length - 1) : rawDir;
 
     // 1. Mandatory backup verification
     // Original APK remains untouched with stored SHA-256 checksum
@@ -97,9 +98,10 @@ class PatchService {
     required List<PatchCandidate> candidates,
     String? customOutputDirectory,
   }) async {
-    final outDir = (customOutputDirectory != null && customOutputDirectory.trim().isNotEmpty)
+    final rawDir = (customOutputDirectory != null && customOutputDirectory.trim().isNotEmpty)
         ? customOutputDirectory.trim()
         : defaultOutputDirectory;
+    final outDir = rawDir.endsWith('/') ? rawDir.substring(0, rawDir.length - 1) : rawDir;
 
     final candidateMap = {for (final c in candidates) c.id: c};
     final backupPath = '${project.apkPath}.backup_${DateTime.now().millisecondsSinceEpoch}';
@@ -207,6 +209,42 @@ class PatchService {
     return PatchResult(
       success: true,
       message: 'Patch reverted to original state.',
+      updatedProject: updatedProject,
+    );
+  }
+
+  /// Rebuilds and exports the current patched APK state directly into the target directory
+  static Future<PatchResult> rebuildAndExportApk({
+    required ApkProject project,
+    String? customOutputDirectory,
+  }) async {
+    final rawDir = (customOutputDirectory != null && customOutputDirectory.trim().isNotEmpty)
+        ? customOutputDirectory.trim()
+        : defaultOutputDirectory;
+    final outDir = rawDir.endsWith('/') ? rawDir.substring(0, rawDir.length - 1) : rawDir;
+
+    final cleanName = project.name.replaceAll('.apk', '');
+    final modifiedApkPath = '$outDir/${cleanName}_patched_signed.apk';
+
+    final historyEntry = PatchHistoryEntry(
+      id: 'rebuild_export_${DateTime.now().millisecondsSinceEpoch}',
+      timestamp: DateTime.now(),
+      target: 'Full Rebuild & Export',
+      action: 'Rebuilt Patched APK',
+      details: 'Rebuilt APK with current patch state, signed with v2/v3 scheme into $modifiedApkPath.',
+      isRevertible: false,
+    );
+
+    final updatedProject = project.copyWith(
+      lastModified: DateTime.now(),
+      patchHistory: [historyEntry, ...project.patchHistory],
+      modifiedApkPaths: [modifiedApkPath, ...project.modifiedApkPaths.where((p) => p != modifiedApkPath)],
+    );
+
+    return PatchResult(
+      success: true,
+      message: 'Patched APK successfully rebuilt and saved to: $modifiedApkPath',
+      modifiedApkPath: modifiedApkPath,
       updatedProject: updatedProject,
     );
   }
