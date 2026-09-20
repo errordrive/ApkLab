@@ -245,6 +245,16 @@ class ApkBuildPipeline {
           orElse: () => parsers.first,
         );
 
+        // Pre-patch verification (PRD Section 18):
+        // Verify class, method, and instruction boundaries before modifying bytecode
+        final isVerified = DialogCandidateDetector.verifyTargetBeforePatch(
+          parser: parser,
+          candidate: candidate,
+        );
+        if (!isVerified) {
+          continue;
+        }
+
         if (candidate.isMethodEntryPatch) {
           parser.patchMethodWithReturnVoid(
             candidate.targetByteOffset,

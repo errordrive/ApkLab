@@ -453,33 +453,104 @@ public class SecurityUtils {
     final dialogFindings = [
       const DialogFinding(
         id: 'dialog_credit_01',
-        title: 'INJECTED CREDIT DIALOG (Modder Popup)',
-        className: 'com.example.mod.ModderCreditDialog',
-        parentClass: 'Landroid/app/dialogbox;',
-        triggeredFrom: 'MainActivity',
-        triggeringMethod: 'onCreate()',
-        layout: 'R.layout.dialogbox_credit',
-        showCall: 'Landroid/app/dialogbox;->show()V',
+        title: 'INJECTED CREDIT DIALOG #01',
+        className: 'com.error.updatedialogue.UpdateDialogue',
+        parentClass: 'android.app.Dialog',
+        triggeredFrom: 'MainActivity.onCreate()',
+        triggeringMethod: 'showDialog(Activity, String, String, String)',
+        layout: 'LinearLayout + CustomWinkView + TextViews + Button',
+        showCall: 'Dialog.show()',
         relatedStrings: [
-          'Modded by APKHacker99',
-          'Credits & Support: t.me/apkhacks',
-          'Join Telegram Channel for more mods',
+          'Modded by Reverse Engineer',
+          'Credits: Telegram @Channel',
           'Dismiss',
+          'OK',
         ],
-        confidence: DetectionConfidence.high,
-        detectionLevel: 'Level 2 — Injected Modder Credit ("Landroid/app/dialogbox")',
+        confidence: DetectionConfidence.veryHigh,
+        detectionLevel: 'Level 2 — Injected Modder Credit Pattern (VERY HIGH)',
         dexFile: 'classes.dex',
-        relatedResources: ['res/layout/dialogbox_credit.xml'],
-        triggerCondition: 'Injected into MainActivity.onCreate() lifecycle hook',
-        callChain: ['MainActivity', 'onCreate()', 'ModderCreditDialog', 'show()V'],
+        relatedResources: ['res/layout/dialogbox_credit.xml', 'res/values/strings.xml'],
+        triggerCondition: 'Activity onCreate / First Launch Hook',
+        callChain: [
+          'MainActivity.onCreate()',
+          'checkAndShow()',
+          'lambda\$checkAndShow\$1()',
+          'lambda\$checkAndShow\$0()',
+          'showDialog()',
+          'Dialog.show()',
+        ],
         riskLevel: 'SAFE TO REMOVE',
         isInjectedCreditDialog: true,
-        creditAuthor: 'APKHacker99 (t.me/apkhacks)',
-        injectionReason: 'Reverse-engineer credit dialogue injected into MainActivity to promote modder channel',
+        creditAuthor: 'Reverse Engineer (t.me/Channel)',
+        injectionReason: 'Reverse-engineer injected credit popup hook into launcher activity',
+        confidenceRating: 'VERY HIGH',
+        confidenceScore: 110,
+        classification: 'Application-created custom Dialog',
+        frameworkType: 'android.app.Dialog',
+        methodSignature: 'showDialog(Landroid/app/Activity;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V',
+        objectRegisterFlow: 'v0 (Dialog) -> <init> -> setContentView(v4) -> show()',
+        creationLocation: 'showDialog (offset 0x0028, new-instance v0, Landroid/app/Dialog;)',
+        contentLocation: 'showDialog (offset 0x007c, invoke-virtual {v0, v4}, setContentView)',
+        showLocation: 'showDialog (offset 0x00a4, invoke-virtual {v0}, Dialog->show())',
+        triggerLocation: 'MainActivity.onCreate() -> checkAndShow() (Activity Lifecycle)',
+        associatedUiComponents: [
+          'LinearLayout (root)',
+          'CustomWinkView',
+          'TextView (title)',
+          'TextView (message)',
+          'Button (action)',
+        ],
+        evidenceList: [
+          '✓ Dialog object instantiated in local registers (v0)',
+          '✓ Dialog constructor invoked on correlated object (v0.<init>)',
+          '✓ Custom LinearLayout created (v4)',
+          '✓ CustomWinkView created (v9)',
+          '✓ TextViews created (v13, v15)',
+          '✓ Button created (v5)',
+          '✓ Views added to same hierarchy (addView)',
+          '✓ setContentView() called with that hierarchy (v0.setContentView(v4))',
+          '✓ Window configured (v0.getWindow())',
+          '✓ show() called on correlated Dialog object (v0.show())',
+          '✓ Call chain established across synthetic lambdas',
+          '✓ Trigger method identified in MainActivity.onCreate()',
+        ],
+        networkRelationship: 'Network-controlled UI candidate (OkHttp -> JSONObject -> checkAndShow())',
+        smaliCode: '''.class public Lcom/error/updatedialogue/UpdateDialogue;
+.super Landroid/app/Dialog;
+
+.method public static showDialog(Landroid/app/Activity;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+    .registers 16
+
+    # Instantiate Dialog object
+    new-instance v0, Landroid/app/Dialog;
+    invoke-direct {v0, p0}, Landroid/app/Dialog;-><init>(Landroid/content/Context;)V
+
+    # Construct View Hierarchy
+    new-instance v4, Landroid/widget/LinearLayout;
+    invoke-direct {v4, p0}, Landroid/widget/LinearLayout;-><init>(Landroid/content/Context;)V
+
+    new-instance v13, Landroid/widget/TextView;
+    invoke-direct {v13, p0}, Landroid/widget/TextView;-><init>(Landroid/content/Context;)V
+    invoke-virtual {v13, p1}, Landroid/widget/TextView;->setText(Ljava/lang/CharSequence;)V
+    invoke-virtual {v4, v13}, Landroid/widget/LinearLayout;->addView(Landroid/view/View;)V
+
+    new-instance v5, Landroid/widget/Button;
+    invoke-direct {v5, p0}, Landroid/widget/Button;-><init>(Landroid/content/Context;)V
+    invoke-virtual {v5, p3}, Landroid/widget/Button;->setText(Ljava/lang/CharSequence;)V
+    invoke-virtual {v4, v5}, Landroid/widget/LinearLayout;->addView(Landroid/view/View;)V
+
+    # Attach View Hierarchy to Dialog
+    invoke-virtual {v0, v4}, Landroid/app/Dialog;->setContentView(Landroid/view/View;)V
+
+    # Display Correlated Dialog
+    invoke-virtual {v0}, Landroid/app/Dialog;->show()V
+
+    return-void
+.end method''',
       ),
       const DialogFinding(
         id: 'dialog_01',
-        title: 'CUSTOM DIALOG #01',
+        title: 'AUTHENTIC APP DIALOG (Rate Us)',
         className: 'com.example.ui.RateUsDialog',
         parentClass: 'android.app.AlertDialog',
         triggeredFrom: 'MainActivity',
@@ -488,12 +559,37 @@ public class SecurityUtils {
         showCall: 'AlertDialog.show()',
         relatedStrings: ['Rate Us', '5 Stars', 'Later'],
         confidence: DetectionConfidence.high,
-        detectionLevel: 'Level 1 — Known Android APIs',
+        detectionLevel: 'Level 1 — Multi-Signal Correlation (HIGH)',
         dexFile: 'classes.dex',
         relatedResources: ['res/layout/dialog_rate_us.xml', 'res/values/strings.xml'],
         triggerCondition: 'sessionCount >= 3 && !hasRated',
         callChain: ['MainActivity', 'onSessionCountReached()', 'RateUsDialog', 'AlertDialog.show()'],
         riskLevel: 'LOW',
+        confidenceRating: 'HIGH',
+        confidenceScore: 70,
+        classification: 'Standard Application Dialog',
+        frameworkType: 'android.app.AlertDialog',
+        methodSignature: 'show(): void',
+        objectRegisterFlow: 'v0 (AlertDialog) -> <init> -> show()',
+        creationLocation: 'RateUsDialog (new-instance v0)',
+        contentLocation: 'res/layout/dialog_rate_us.xml',
+        showLocation: 'RateUsDialog->show()V',
+        triggerLocation: 'onSessionCountReached()',
+        associatedUiComponents: ['RatingBar', 'TextView', 'Button'],
+        evidenceList: [
+          '✓ AlertDialog object instantiated',
+          '✓ show() method verified on dialog object',
+          '✓ Session threshold trigger identified',
+        ],
+        networkRelationship: 'None',
+        smaliCode: '''.class public Lcom/example/ui/RateUsDialog;
+.super Landroid/app/AlertDialog;
+
+.method public show()V
+    .registers 2
+    invoke-super {p0}, Landroid/app/AlertDialog;->show()V
+    return-void
+.end method''',
       ),
       const DialogFinding(
         id: 'dialog_02',

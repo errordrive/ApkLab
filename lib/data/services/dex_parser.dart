@@ -23,6 +23,25 @@ class DexMethodRef {
   String toString() => fullSignature;
 }
 
+class DexFieldRef {
+  final int fieldIndex;
+  final String classDescriptor;
+  final String fieldName;
+  final String typeDescriptor;
+
+  const DexFieldRef({
+    required this.fieldIndex,
+    required this.classDescriptor,
+    required this.fieldName,
+    required this.typeDescriptor,
+  });
+
+  String get fullSignature => '$classDescriptor->$fieldName:$typeDescriptor';
+
+  @override
+  String toString() => fullSignature;
+}
+
 class DexInstruction {
   final int opcode;
   final int byteOffset;
@@ -31,6 +50,9 @@ class DexInstruction {
   final DexMethodRef? targetMethod;
   final String? stringConstant;
   final String? targetType;
+  final DexFieldRef? targetField;
+  final List<int> registers;
+  final int? destRegister;
 
   const DexInstruction({
     required this.opcode,
@@ -40,6 +62,9 @@ class DexInstruction {
     this.targetMethod,
     this.stringConstant,
     this.targetType,
+    this.targetField,
+    this.registers = const [],
+    this.destRegister,
   });
 
   @override
@@ -111,6 +136,7 @@ class DexParser {
 
   final List<String> strings = [];
   final List<String> types = [];
+  final List<DexFieldRef> fields = [];
   final List<DexMethodRef> methods = [];
   final List<DexClassDef> classes = [];
 
@@ -136,6 +162,9 @@ class DexParser {
 
       final protoIdsSize = _byteData.getUint32(72, Endian.little);
       final protoIdsOff = _byteData.getUint32(76, Endian.little);
+
+      final fieldIdsSize = _byteData.getUint32(80, Endian.little);
+      final fieldIdsOff = _byteData.getUint32(84, Endian.little);
 
       final methodIdsSize = _byteData.getUint88(88, Endian.little);
       final methodIdsOff = _byteData.getUint32(92, Endian.little);
@@ -178,7 +207,28 @@ class DexParser {
         protoParamTypes.add(params);
       }
 
-      // 4. Parse Methods
+      // 4. Parse Fields
+      fields.clear();
+      for (int i = 0; i < fieldIdsSize; i++) {
+        final classIdx = _byteData.getUint16(fieldIdsOff + i * 8, Endian.little);
+        final typeIdx = _byteData.getUint16(fieldIdsOff + i * 8 + 2, Endian.little);
+        final nameIdx = _byteData.getUint32(fieldIdsOff + i * 8 + 4, Endian.little);
+
+        final classDesc = classIdx < types.length ? types[classIdx] : 'Lunknown;';
+        final typeDesc = typeIdx < types.length ? types[typeIdx] : 'Lunknown;';
+        final fieldName = nameIdx < strings.length ? strings[nameIdx] : 'field$i';
+
+        fields.add(
+          DexFieldRef(
+            fieldIndex: i,
+            classDescriptor: classDesc,
+            fieldName: fieldName,
+            typeDescriptor: typeDesc,
+          ),
+        );
+      }
+
+      // 5. Parse Methods
       methods.clear();
       for (int i = 0; i < methodIdsSize; i++) {
         final classIdx = _byteData.getUint16(methodIdsOff + i * 8, Endian.little);
@@ -363,10 +413,43 @@ class DexParser {
       DexMethodRef? targetMethod;
       String? stringConst;
       String? targetType;
+      DexFieldRef? targetField;
+      List<int> insnRegisters = [];
+      int? destReg;
 
       switch (opcode) {
         case 0x00: // nop
           smali = 'nop';
+          lengthInCodeUnits = 1;
+          break;
+        case 0x01: // move
+        case 0x04: // move-wide
+        case 0x07: // move-object
+          destReg = (rawOp >> 8) & 0x0F;
+          final src = (rawOp >> 12) & 0x0F;
+          insnRegisters = [src];
+          smali = '${opcode == 0x07 ? "move-object" : (opcode == 0x04 ? "move-wide" : "move")} v$destReg, v$src';
+          lengthInCodeUnits = 1;
+          break;
+        case 0x02: // move/from16
+        case 0x08: // move-object/from16
+          if (pc + 1 < insnsSize) {
+            destReg = (rawOp >> 8) & 0xFF;
+            final src = _byteData.getUint16(insnByteOff + 2, Endian.little);
+            insnRegisters = [src];
+            smali = '${opcode == 0x08 ? "move-object/from16" : "move/from16"} v$destReg, v$src';
+            lengthInCodeUnits = 2;
+          }
+          break;
+        case 0x0a: // move-result
+        case 0x0b: // move-result-wide
+        case 0x0c: // move-result-object
+        case 0x0d: // move-exception
+          destReg = (rawOp >> 8) & 0xFF;
+          final mName = opcode == 0x0c
+              ? 'move-result-object'
+              : (opcode == 0x0d ? 'move-exception' : (opcode == 0x0b ? 'move-result-wide' : 'move-result'));
+          smali = '$mName v$destReg';
           lengthInCodeUnits = 1;
           break;
         case 0x0e: // return-void
@@ -377,76 +460,147 @@ class DexParser {
         case 0x10: // return-wide
         case 0x11: // return-object
           final reg = (rawOp >> 8) & 0xFF;
-          smali = 'return v$reg';
+          insnRegisters = [reg];
+          smali = '${opcode == 0x11 ? "return-object" : "return"} v$reg';
           lengthInCodeUnits = 1;
           break;
         case 0x12: // const/4
-          final reg = (rawOp >> 8) & 0x0F;
+          destReg = (rawOp >> 8) & 0x0F;
           final lit = (rawOp >> 12) & 0x0F;
-          smali = 'const/4 v$reg, $lit';
+          smali = 'const/4 v$destReg, $lit';
           lengthInCodeUnits = 1;
           break;
         case 0x13: // const/16
           if (pc + 1 < insnsSize) {
-            final reg = (rawOp >> 8) & 0xFF;
+            destReg = (rawOp >> 8) & 0xFF;
             final val = _byteData.getInt16(insnByteOff + 2, Endian.little);
-            smali = 'const/16 v$reg, $val';
+            smali = 'const/16 v$destReg, $val';
             lengthInCodeUnits = 2;
           }
           break;
         case 0x14: // const
           if (pc + 2 < insnsSize) {
-            final reg = (rawOp >> 8) & 0xFF;
+            destReg = (rawOp >> 8) & 0xFF;
             final val = _byteData.getInt32(insnByteOff + 2, Endian.little);
-            smali = 'const v$reg, $val';
+            smali = 'const v$destReg, $val';
             lengthInCodeUnits = 3;
           }
           break;
         case 0x1a: // const-string
           if (pc + 1 < insnsSize) {
-            final reg = (rawOp >> 8) & 0xFF;
+            destReg = (rawOp >> 8) & 0xFF;
             final stringIdx = _byteData.getUint16(insnByteOff + 2, Endian.little);
             if (stringIdx < strings.length) {
               stringConst = strings[stringIdx];
               stringsReferenced.add(stringConst);
               final escaped = stringConst.replaceAll('\n', '\\n').replaceAll('\r', '');
-              smali = 'const-string v$reg, "$escaped"';
+              smali = 'const-string v$destReg, "$escaped"';
             } else {
-              smali = 'const-string v$reg, string@$stringIdx';
+              smali = 'const-string v$destReg, string@$stringIdx';
             }
             lengthInCodeUnits = 2;
           }
           break;
         case 0x1b: // const-string/jumbo
           if (pc + 2 < insnsSize) {
-            final reg = (rawOp >> 8) & 0xFF;
+            destReg = (rawOp >> 8) & 0xFF;
             final stringIdx = _byteData.getUint32(insnByteOff + 2, Endian.little);
             if (stringIdx < strings.length) {
               stringConst = strings[stringIdx];
               stringsReferenced.add(stringConst);
               final escaped = stringConst.replaceAll('\n', '\\n').replaceAll('\r', '');
-              smali = 'const-string/jumbo v$reg, "$escaped"';
+              smali = 'const-string/jumbo v$destReg, "$escaped"';
             } else {
-              smali = 'const-string/jumbo v$reg, string@$stringIdx';
+              smali = 'const-string/jumbo v$destReg, string@$stringIdx';
             }
             lengthInCodeUnits = 3;
           }
           break;
         case 0x1c: // const-class
           if (pc + 1 < insnsSize) {
-            final reg = (rawOp >> 8) & 0xFF;
+            destReg = (rawOp >> 8) & 0xFF;
             final typeIdx = _byteData.getUint16(insnByteOff + 2, Endian.little);
             targetType = typeIdx < types.length ? types[typeIdx] : 'type@$typeIdx';
-            smali = 'const-class v$reg, $targetType';
+            smali = 'const-class v$destReg, $targetType';
+            lengthInCodeUnits = 2;
+          }
+          break;
+        case 0x1f: // check-cast
+          if (pc + 1 < insnsSize) {
+            destReg = (rawOp >> 8) & 0xFF;
+            final typeIdx = _byteData.getUint16(insnByteOff + 2, Endian.little);
+            targetType = typeIdx < types.length ? types[typeIdx] : 'type@$typeIdx';
+            smali = 'check-cast v$destReg, $targetType';
             lengthInCodeUnits = 2;
           }
           break;
         case 0x22: // new-instance
           if (pc + 1 < insnsSize) {
-            final reg = (rawOp >> 8) & 0xFF;
+            destReg = (rawOp >> 8) & 0xFF;
             final typeIdx = _byteData.getUint16(insnByteOff + 2, Endian.little);
             targetType = typeIdx < types.length ? types[typeIdx] : 'type@$typeIdx';
-            smali = 'new-instance v$reg, $targetType';
+            smali = 'new-instance v$destReg, $targetType';
+            lengthInCodeUnits = 2;
+          }
+          break;
+        case 0x52: // iget
+        case 0x54: // iget-object
+          if (pc + 1 < insnsSize) {
+            destReg = (rawOp >> 8) & 0x0F;
+            final objReg = (rawOp >> 12) & 0x0F;
+            insnRegisters = [objReg];
+            final fieldIdx = _byteData.getUint16(insnByteOff + 2, Endian.little);
+            if (fieldIdx < fields.length) {
+              targetField = fields[fieldIdx];
+              smali = '${opcode == 0x54 ? "iget-object" : "iget"} v$destReg, v$objReg, ${targetField.fullSignature}';
+            } else {
+              smali = '${opcode == 0x54 ? "iget-object" : "iget"} v$destReg, v$objReg, field@$fieldIdx';
+            }
+            lengthInCodeUnits = 2;
+          }
+          break;
+        case 0x59: // iput
+        case 0x5b: // iput-object
+          if (pc + 1 < insnsSize) {
+            final valReg = (rawOp >> 8) & 0x0F;
+            final objReg = (rawOp >> 12) & 0x0F;
+            insnRegisters = [valReg, objReg];
+            final fieldIdx = _byteData.getUint16(insnByteOff + 2, Endian.little);
+            if (fieldIdx < fields.length) {
+              targetField = fields[fieldIdx];
+              smali = '${opcode == 0x5b ? "iput-object" : "iput"} v$valReg, v$objReg, ${targetField.fullSignature}';
+            } else {
+              smali = '${opcode == 0x5b ? "iput-object" : "iput"} v$valReg, v$objReg, field@$fieldIdx';
+            }
+            lengthInCodeUnits = 2;
+          }
+          break;
+        case 0x60: // sget
+        case 0x62: // sget-object
+          if (pc + 1 < insnsSize) {
+            destReg = (rawOp >> 8) & 0xFF;
+            final fieldIdx = _byteData.getUint16(insnByteOff + 2, Endian.little);
+            if (fieldIdx < fields.length) {
+              targetField = fields[fieldIdx];
+              smali = '${opcode == 0x62 ? "sget-object" : "sget"} v$destReg, ${targetField.fullSignature}';
+            } else {
+              smali = '${opcode == 0x62 ? "sget-object" : "sget"} v$destReg, field@$fieldIdx';
+            }
+            lengthInCodeUnits = 2;
+          }
+          break;
+        case 0x67: // sput
+        case 0x69: // sput-object
+          if (pc + 1 < insnsSize) {
+            final valReg = (rawOp >> 8) & 0xFF;
+            insnRegisters = [valReg];
+            final fieldIdx = _byteData.getUint16(insnByteOff + 2, Endian.little);
+            if (fieldIdx < fields.length) {
+              targetField = fields[fieldIdx];
+              smali = '${opcode == 0x69 ? "sput-object" : "sput"} v$valReg, ${targetField.fullSignature}';
+            } else {
+              smali = '${opcode == 0x69 ? "sput-object" : "sput"} v$valReg, field@$fieldIdx';
+            }
             lengthInCodeUnits = 2;
           }
           break;
@@ -457,13 +611,31 @@ class DexParser {
         case 0x72: // invoke-interface
           if (pc + 2 < insnsSize) {
             final opName = _getInvokeName(opcode);
+            final count = (rawOp >> 12) & 0x0F;
+            final regG = (rawOp >> 8) & 0x0F;
             final methodIdx = _byteData.getUint16(insnByteOff + 2, Endian.little);
+            final regWord = _byteData.getUint16(insnByteOff + 4, Endian.little);
+            final regC = regWord & 0x0F;
+            final regD = (regWord >> 4) & 0x0F;
+            final regE = (regWord >> 8) & 0x0F;
+            final regF = (regWord >> 12) & 0x0F;
+
+            final regs = <int>[];
+            if (count >= 1) regs.add(regC);
+            if (count >= 2) regs.add(regD);
+            if (count >= 3) regs.add(regE);
+            if (count >= 4) regs.add(regF);
+            if (count == 5) regs.add(regG);
+            insnRegisters = regs;
+
             if (methodIdx < methods.length) {
               targetMethod = methods[methodIdx];
               methodsInvoked.add(targetMethod);
-              smali = '$opName {...}, ${targetMethod.fullSignature}';
+              final regList = regs.map((r) => 'v$r').join(', ');
+              smali = '$opName {$regList}, ${targetMethod.fullSignature}';
             } else {
-              smali = '$opName {...}, method@$methodIdx';
+              final regList = regs.map((r) => 'v$r').join(', ');
+              smali = '$opName {$regList}, method@$methodIdx';
             }
             lengthInCodeUnits = 3;
           }
@@ -475,13 +647,24 @@ class DexParser {
         case 0x78: // invoke-interface/range
           if (pc + 2 < insnsSize) {
             final opName = '${_getInvokeName(opcode - 6)}/range';
+            final count = (rawOp >> 8) & 0xFF;
             final methodIdx = _byteData.getUint16(insnByteOff + 2, Endian.little);
+            final firstReg = _byteData.getUint16(insnByteOff + 4, Endian.little);
+
+            final regs = <int>[];
+            for (int r = 0; r < count; r++) {
+              regs.add(firstReg + r);
+            }
+            insnRegisters = regs;
+
             if (methodIdx < methods.length) {
               targetMethod = methods[methodIdx];
               methodsInvoked.add(targetMethod);
-              smali = '$opName {vN..vM}, ${targetMethod.fullSignature}';
+              final lastReg = firstReg + count - 1;
+              smali = '$opName {v$firstReg..v$lastReg}, ${targetMethod.fullSignature}';
             } else {
-              smali = '$opName {vN..vM}, method@$methodIdx';
+              final lastReg = firstReg + count - 1;
+              smali = '$opName {v$firstReg..v$lastReg}, method@$methodIdx';
             }
             lengthInCodeUnits = 3;
           }
@@ -501,6 +684,9 @@ class DexParser {
           targetMethod: targetMethod,
           stringConstant: stringConst,
           targetType: targetType,
+          targetField: targetField,
+          registers: insnRegisters,
+          destRegister: destReg,
         ),
       );
 

@@ -153,11 +153,11 @@ class ApkAnalyzerService {
     );
     await Future.delayed(const Duration(milliseconds: 350));
 
-    // Step 8: Dialog Detection (Levels 1 to 5)
+    // Step 8: Multi-Signal Dialog Detection & Correlation
     yield AnalysisLog(
       timestamp: DateTime.now(),
       stage: 'Dialog Detection',
-      message: 'Executing 5-level detection engine: APIs, Structure, Smali patterns, Call graphs & Resources...',
+      message: 'Executing multi-signal correlation engine: Object Flow, UI Hierarchy, Call Graph & Trigger Analysis...',
       level: LogLevel.info,
       progressPercent: 82,
     );
@@ -279,8 +279,21 @@ class ApkAnalyzerService {
       }
     }
 
-    // 3. Scan for dialog candidates dynamically across all DEX files
-    final detectedCandidates = DialogCandidateDetector.scanAll(dexParsers);
+    // 3. Scan for dialog candidates dynamically across all DEX files using multi-signal correlation
+    final detectedCandidates = DialogCandidateDetector.scanAll(
+      dexParsers,
+      onLog: (msg) {
+        logs.add(
+          AnalysisLog(
+            timestamp: DateTime.now(),
+            stage: 'Dialog Detection',
+            message: msg,
+            level: LogLevel.info,
+            progressPercent: 82,
+          ),
+        );
+      },
+    );
     final dialogFindings = detectedCandidates.map((c) => c.finding).toList();
     final patchCandidates = detectedCandidates.map((c) => c.patchCandidate).toList();
 

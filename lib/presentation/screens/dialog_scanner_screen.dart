@@ -362,7 +362,7 @@ class _DialogScannerScreenState extends State<DialogScannerScreen> {
             ),
           ),
 
-        // Finding Header Card (PRD Section 7)
+        // Finding Header Card (PRD Section 7 & 17)
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -390,18 +390,99 @@ class _DialogScannerScreenState extends State<DialogScannerScreen> {
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      StatusBadge.confidence(f.confidence.name),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: AppColors.primary.withValues(alpha: 0.4)),
+                        ),
+                        child: Text(
+                          '${f.confidenceRating} (${f.confidenceScore} pts)',
+                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.primary),
+                        ),
+                      ),
                       const SizedBox(width: 8),
                       StatusBadge.risk(f.riskLevel),
                     ],
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              Text(
-                f.detectionLevel,
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.accent),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Text(
+                    f.classification,
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.accent),
+                  ),
+                  const Text(' • ', style: TextStyle(color: AppColors.textSecondary)),
+                  Text(
+                    f.frameworkType,
+                    style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: AppColors.textSecondary),
+                  ),
+                ],
               ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // Correlated Evidence Checklist (PRD Section 17)
+        if (f.evidenceList.isNotEmpty) ...[
+          _buildSectionHeader('Multi-Signal Correlated Evidence (${f.evidenceList.length} Signals)'),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.card,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: f.evidenceList.map((ev) {
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.check_circle, size: 14, color: AppColors.success),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          ev,
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: AppColors.textPrimary),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+
+        // Object & Data Flow Correlation (PRD Section 3, 14 & 17)
+        _buildSectionHeader('Object Identity & Register Data Flow'),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppColors.card,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildFlowRow('Data Flow', f.objectRegisterFlow.isNotEmpty ? f.objectRegisterFlow : 'Correlated across method execution path'),
+              const Divider(height: 16),
+              _buildFlowRow('Creation Location', f.creationLocation.isNotEmpty ? f.creationLocation : 'Method entry'),
+              const Divider(height: 16),
+              _buildFlowRow('Content Location', f.contentLocation.isNotEmpty ? f.contentLocation : 'Default layout hierarchy'),
+              const Divider(height: 16),
+              _buildFlowRow('Show Location', f.showLocation.isNotEmpty ? f.showLocation : f.showCall),
+              const Divider(height: 16),
+              _buildFlowRow('Trigger Location', f.triggerLocation.isNotEmpty ? f.triggerLocation : f.triggerCondition),
             ],
           ),
         ),
@@ -410,12 +491,12 @@ class _DialogScannerScreenState extends State<DialogScannerScreen> {
         // Dialog Relationship Graph (PRD Section 8)
         RelationshipGraphWidget(
           callChain: f.callChain,
-          title: 'Dialog Relationship Graph (Section 8)',
+          title: 'Dialog Relationship Graph & Call Chain',
         ),
         const SizedBox(height: 16),
 
-        // Technical Finding Details (PRD Section 7)
-        _buildSectionHeader('Dialog Finding Details'),
+        // Technical Finding Details (PRD Section 7 & 17)
+        _buildSectionHeader('Technical Specifications'),
         Container(
           decoration: BoxDecoration(
             color: AppColors.card,
@@ -425,25 +506,38 @@ class _DialogScannerScreenState extends State<DialogScannerScreen> {
           child: Column(
             children: [
               _buildDetailRow('Class', f.className),
-              _buildDetailRow('Parent', f.parentClass),
-              _buildDetailRow('Triggered From', f.triggeredFrom),
               _buildDetailRow('Method', f.triggeringMethod),
-              _buildDetailRow('Layout', f.layout),
-              _buildDetailRow('Show Call', f.showCall),
-              _buildDetailRow('Related Strings', f.relatedStrings.map((s) => '"$s"').join(', ')),
-              _buildDetailRow('Trigger Condition', f.triggerCondition),
+              if (f.methodSignature.isNotEmpty)
+                _buildDetailRow('Method Signature', f.methodSignature),
               _buildDetailRow('DEX File', f.dexFile),
+              _buildDetailRow('Smali Path', 'smali/${f.className.replaceAll(".", "/")}.smali'),
+              _buildDetailRow('Parent Class', f.parentClass),
+              _buildDetailRow('Framework', f.frameworkType),
+              if (f.associatedUiComponents.isNotEmpty)
+                _buildDetailRow('UI Components', f.associatedUiComponents.join(', ')),
+              _buildDetailRow('Layout / Root', f.layout),
+              _buildDetailRow('Related Strings', f.relatedStrings.map((s) => '"$s"').join(', ')),
+              _buildDetailRow('Network Relationship', f.networkRelationship),
               _buildDetailRow('Related Resources', f.relatedResources.join('\n')),
             ],
           ),
         ),
         const SizedBox(height: 20),
 
-        // Actions
+        // Actions: [Inspect Smali] + [Kill / Patch] + [JADX]
         Wrap(
           spacing: 12,
           runSpacing: 10,
           children: [
+            ElevatedButton.icon(
+              onPressed: () => _showInspectSmaliModal(context, f),
+              icon: const Icon(Icons.code, size: 16),
+              label: const Text('Inspect Smali', style: TextStyle(fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+              ),
+            ),
             if (isCredit)
               ElevatedButton.icon(
                 onPressed: () => _killSingleFinding(context, appState, f),
@@ -469,6 +563,27 @@ class _DialogScannerScreenState extends State<DialogScannerScreen> {
               label: const Text('Inspect Source (JADX)'),
             ),
           ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFlowRow(String label, String value) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 130,
+          child: Text(
+            label,
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.textSecondary),
+          ),
+        ),
+        Expanded(
+          child: SelectableText(
+            value,
+            style: const TextStyle(fontSize: 11, fontFamily: 'monospace', fontWeight: FontWeight.w600, color: AppColors.accent),
+          ),
         ),
       ],
     );
@@ -527,6 +642,78 @@ class _DialogScannerScreenState extends State<DialogScannerScreen> {
             ],
           );
         },
+      ),
+    );
+  }
+
+  void _showInspectSmaliModal(BuildContext context, DialogFinding f) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Row(
+          children: [
+            const Icon(Icons.code, color: AppColors.accent, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Smali: ${f.simpleName}',
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: 650,
+          height: 450,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Class: ${f.className}',
+                style: const TextStyle(fontSize: 11, fontFamily: 'monospace', fontWeight: FontWeight.bold, color: AppColors.primary),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'Method: ${f.methodSignature.isNotEmpty ? f.methodSignature : f.triggeringMethod}',
+                style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: AppColors.textSecondary),
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.codeBackground,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: SingleChildScrollView(
+                    child: SelectableText(
+                      f.smaliCode.isNotEmpty ? f.smaliCode : '# Disassembled Smali bytecode for ${f.className}\n.method public show()V\n    # Dialog show invocation\n.end method',
+                      style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: AppColors.textPrimary, height: 1.4),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('CLOSE'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(ctx);
+              context.read<AppState>().setNavIndex(3); // Smali Screen
+            },
+            icon: const Icon(Icons.open_in_new, size: 14),
+            label: const Text('OPEN IN SMALI EXPLORER'),
+          ),
+        ],
       ),
     );
   }
