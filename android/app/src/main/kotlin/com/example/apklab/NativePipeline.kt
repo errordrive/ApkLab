@@ -201,7 +201,7 @@ object NativePipeline {
 
     /**
      * Performs standard Android zipalign on an APK archive:
-     * - Preserves STORED (uncompressed) compression for resources.arsc and lib/**\/*.so
+     * - Preserves STORED (uncompressed) compression for resources.arsc and native libraries in lib/
      * - Aligns uncompressed .so libraries to 4096-byte (4KB) page boundaries
      * - Aligns all other uncompressed entries (resources.arsc, assets) to 4-byte boundaries
      */
@@ -222,7 +222,7 @@ object NativePipeline {
 
         ZipFile(inputFile).use { zipIn ->
             val countingOut = CountingOutputStream(FileOutputStream(outputFile))
-            ZipOutputStream(countingOut).use { zipOut =
+            ZipOutputStream(countingOut).use { zipOut ->
                 // Set compression level
                 zipOut.setLevel(java.util.zip.Deflater.BEST_COMPRESSION)
 
