@@ -31,7 +31,7 @@ class PatchResult {
 
 class PatchService {
   /// Default output directory for rebuilt APKs on Android storage
-  static const String defaultOutputDirectory = '/storage/emulated/0';
+  static const String defaultOutputDirectory = '';
 
   /// Applies a patch candidate with mandatory backup, smali modification,
   /// real DEX rebuild, zipalign, and signing into the output directory.
@@ -98,7 +98,7 @@ class PatchService {
     }
 
     final cleanName = project.name.replaceAll('.apk', '').replaceAll(RegExp(r'[^a-zA-Z0-9_\-]'), '_');
-    final modifiedApkPath = buildResult?.outputApkPath ?? '$outDir/ApkLab/output/patched-$cleanName.apk';
+    final modifiedApkPath = buildResult?.outputApkPath ?? (outDir.isNotEmpty ? '$outDir/patched-$cleanName.apk' : 'patched-$cleanName.apk');
 
     final historyEntry = PatchHistoryEntry(
       id: 'patch_hist_${DateTime.now().millisecondsSinceEpoch}',
@@ -125,14 +125,15 @@ class PatchService {
       outputApkName: 'patched-$cleanName.apk',
       sizeBytes: buildResult?.sizeBytes ?? 0,
       completedStages: buildResult?.completedStages ?? [
-        'APK decoded',
-        'DEX analyzed',
-        'Smali analyzed',
-        'Target identified',
-        'Transformation applied',
-        'APK rebuilt',
-        'APK signed',
-        'APK verified',
+        'Prepare private workspace',
+        'Decode APK',
+        'Analyze DEX/Smali',
+        'Apply patch',
+        'Rebuild APK',
+        'Zipalign',
+        'Sign APK',
+        'Export through SAF',
+        'Verify exported APK',
       ],
       updatedProject: updatedProject,
     );
@@ -202,7 +203,7 @@ class PatchService {
     }
 
     final cleanName = project.name.replaceAll('.apk', '').replaceAll(RegExp(r'[^a-zA-Z0-9_\-]'), '_');
-    final modifiedApkPath = buildResult?.outputApkPath ?? '$outDir/ApkLab/output/patched-$cleanName.apk';
+    final modifiedApkPath = buildResult?.outputApkPath ?? (outDir.isNotEmpty ? '$outDir/patched-$cleanName.apk' : 'patched-$cleanName.apk');
 
     final historyEntry = PatchHistoryEntry(
       id: 'batch_patch_hist_${DateTime.now().millisecondsSinceEpoch}',
@@ -229,14 +230,15 @@ class PatchService {
       outputApkName: 'patched-$cleanName.apk',
       sizeBytes: buildResult?.sizeBytes ?? 0,
       completedStages: buildResult?.completedStages ?? [
-        'APK decoded',
-        'DEX analyzed',
-        'Smali analyzed',
-        'Target identified',
-        'Transformation applied',
-        'APK rebuilt',
-        'APK signed',
-        'APK verified',
+        'Prepare private workspace',
+        'Decode APK',
+        'Analyze DEX/Smali',
+        'Apply patch',
+        'Rebuild APK',
+        'Zipalign',
+        'Sign APK',
+        'Export through SAF',
+        'Verify exported APK',
       ],
       updatedProject: updatedProject,
     );
@@ -328,7 +330,7 @@ class PatchService {
     }
 
     final cleanName = project.name.replaceAll('.apk', '').replaceAll(RegExp(r'[^a-zA-Z0-9_\-]'), '_');
-    final modifiedApkPath = buildResult?.outputApkPath ?? '$outDir/ApkLab/output/patched-$cleanName.apk';
+    final modifiedApkPath = buildResult?.outputApkPath ?? (outDir.isNotEmpty ? '$outDir/patched-$cleanName.apk' : 'patched-$cleanName.apk');
 
     final historyEntry = PatchHistoryEntry(
       id: 'rebuild_export_${DateTime.now().millisecondsSinceEpoch}',
@@ -352,14 +354,15 @@ class PatchService {
       outputApkName: 'patched-$cleanName.apk',
       sizeBytes: buildResult?.sizeBytes ?? 0,
       completedStages: buildResult?.completedStages ?? [
-        'APK decoded',
-        'DEX analyzed',
-        'Smali analyzed',
-        'Target identified',
-        'Transformation applied',
-        'APK rebuilt',
-        'APK signed',
-        'APK verified',
+        'Prepare private workspace',
+        'Decode APK',
+        'Analyze DEX/Smali',
+        'Apply patch',
+        'Rebuild APK',
+        'Zipalign',
+        'Sign APK',
+        'Export through SAF',
+        'Verify exported APK',
       ],
       updatedProject: updatedProject,
     );

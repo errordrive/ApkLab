@@ -34,14 +34,15 @@ class BuildPipelineDialog extends StatefulWidget {
 
 class _BuildPipelineDialogState extends State<BuildPipelineDialog> {
   static const List<String> allStages = [
-    'APK decoded',
-    'DEX analyzed',
-    'Smali analyzed',
-    'Target identified',
-    'Transformation applied',
-    'APK rebuilt',
-    'APK signed',
-    'APK verified',
+    'Prepare private workspace',
+    'Decode APK',
+    'Analyze DEX/Smali',
+    'Apply patch',
+    'Rebuild APK',
+    'Zipalign',
+    'Sign APK',
+    'Export through SAF',
+    'Verify exported APK',
   ];
 
   String _currentStage = 'Initializing build pipeline...';

@@ -73,8 +73,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
-    if (_folderController.text.isEmpty) {
-      _folderController.text = appState.customOutputDirectory;
+    if (_folderController.text != appState.outputDirectoryDisplayName) {
+      _folderController.text = appState.outputDirectoryDisplayName;
     }
 
     return ListView(
@@ -149,7 +149,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const Text('Rebuilt APK Destination Path', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
               const SizedBox(height: 6),
               const Text(
-                'After patching, rebuilt and re-signed APKs are saved to this custom local folder.',
+                'After patching, rebuilt and re-signed APKs are saved to this folder via Storage Access Framework (SAF).',
                 style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
               ),
               const SizedBox(height: 12),
@@ -158,28 +158,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   Expanded(
                     child: TextField(
                       controller: _folderController,
-                      decoration: const InputDecoration(
+                      readOnly: true,
+                      onTap: () async {
+                        await appState.pickOutputDirectory();
+                        _folderController.text = appState.outputDirectoryDisplayName;
+                      },
+                      decoration: InputDecoration(
                         isDense: true,
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.folder_open, size: 18, color: AppColors.accent),
+                        border: const OutlineInputBorder(),
+                        prefixIcon: const Icon(Icons.folder_open, size: 18, color: AppColors.accent),
+                        hintText: 'Tap to choose folder via SAF',
+                        helperText: appState.hasOutputDirectory ? 'Folder access granted via SAF' : 'No folder chosen',
                       ),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  ElevatedButton(
-                    onPressed: () {
-                      final path = _folderController.text.trim();
-                      if (path.isNotEmpty) {
-                        appState.setOutputDirectory(path);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Rebuild folder updated: $path'),
-                            backgroundColor: AppColors.success,
-                          ),
-                        );
-                      }
+                  ElevatedButton.icon(
+                    onPressed: () async {
+                      await appState.pickOutputDirectory();
+                      _folderController.text = appState.outputDirectoryDisplayName;
                     },
-                    child: const Text('SAVE'),
+                    icon: const Icon(Icons.folder_open, size: 14),
+                    label: const Text('CHOOSE FOLDER'),
                   ),
                 ],
               ),

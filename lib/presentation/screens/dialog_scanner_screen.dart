@@ -629,7 +629,23 @@ class _DialogScannerScreenState extends State<DialogScannerScreen> {
     );
   }
 
-  void _killInjectedCreditOnly(BuildContext context, AppState appState) {
+  void _killInjectedCreditOnly(BuildContext context, AppState appState) async {
+    if (!appState.hasOutputDirectory) {
+      final picked = await appState.pickOutputDirectory();
+      if (!picked || !appState.hasOutputDirectory) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Please select an output folder to save the rebuilt APK.'),
+              backgroundColor: AppColors.warning,
+            ),
+          );
+        }
+        return;
+      }
+    }
+    if (!context.mounted) return;
+
     BuildPipelineDialog.show(
       context,
       title: 'Neutralizing Injected Credit Dialogue',
@@ -637,7 +653,23 @@ class _DialogScannerScreenState extends State<DialogScannerScreen> {
     );
   }
 
-  void _killSingleFinding(BuildContext context, AppState appState, DialogFinding finding) {
+  void _killSingleFinding(BuildContext context, AppState appState, DialogFinding finding) async {
+    if (!appState.hasOutputDirectory) {
+      final picked = await appState.pickOutputDirectory();
+      if (!picked || !appState.hasOutputDirectory) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Please select an output folder to save the rebuilt APK.'),
+              backgroundColor: AppColors.warning,
+            ),
+          );
+        }
+        return;
+      }
+    }
+    if (!context.mounted) return;
+
     BuildPipelineDialog.show(
       context,
       title: 'Killing ${finding.title}',
@@ -645,7 +677,23 @@ class _DialogScannerScreenState extends State<DialogScannerScreen> {
     );
   }
 
-  void _autoPatchAllDialogs(BuildContext context, AppState appState) {
+  void _autoPatchAllDialogs(BuildContext context, AppState appState) async {
+    if (!appState.hasOutputDirectory) {
+      final picked = await appState.pickOutputDirectory();
+      if (!picked || !appState.hasOutputDirectory) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Please select an output folder to save the rebuilt APK.'),
+              backgroundColor: AppColors.warning,
+            ),
+          );
+        }
+        return;
+      }
+    }
+    if (!context.mounted) return;
+
     BuildPipelineDialog.show(
       context,
       title: 'Auto-patching All Dialogues',

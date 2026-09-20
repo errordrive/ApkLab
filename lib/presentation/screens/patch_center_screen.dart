@@ -18,8 +18,25 @@ class PatchCenterScreen extends StatefulWidget {
 class _PatchCenterScreenState extends State<PatchCenterScreen> {
   PatchCandidate? _previewCandidate;
 
-  void _applyPatch(BuildContext context, PatchCandidate candidate) {
+  void _applyPatch(BuildContext context, PatchCandidate candidate) async {
     final appState = context.read<AppState>();
+    if (!appState.hasOutputDirectory) {
+      final picked = await appState.pickOutputDirectory();
+      if (!picked || !appState.hasOutputDirectory) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Please select an output folder to save the rebuilt APK.'),
+              backgroundColor: AppColors.warning,
+            ),
+          );
+        }
+        return;
+      }
+    }
+
+    if (!context.mounted) return;
+
     setState(() {
       _previewCandidate = null;
     });
@@ -48,7 +65,24 @@ class _PatchCenterScreenState extends State<PatchCenterScreen> {
     );
   }
 
-  void _rebuildAndExportApk(BuildContext context, AppState appState) {
+  void _rebuildAndExportApk(BuildContext context, AppState appState) async {
+    if (!appState.hasOutputDirectory) {
+      final picked = await appState.pickOutputDirectory();
+      if (!picked || !appState.hasOutputDirectory) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Please select an output folder to save the rebuilt APK.'),
+              backgroundColor: AppColors.warning,
+            ),
+          );
+        }
+        return;
+      }
+    }
+
+    if (!context.mounted) return;
+
     BuildPipelineDialog.show(
       context,
       title: 'Rebuilding & Signing Patched APK',
@@ -168,8 +202,12 @@ class _PatchCenterScreenState extends State<PatchCenterScreen> {
                         style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5, color: AppColors.textSecondary),
                       ),
                       Text(
-                        appState.customOutputDirectory,
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, fontFamily: 'monospace', color: AppColors.textPrimary),
+                        appState.hasOutputDirectory ? appState.outputDirectoryDisplayName : 'No folder selected (Tap to choose)',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: appState.hasOutputDirectory ? AppColors.textPrimary : AppColors.warning,
+                        ),
                       ),
                     ],
                   ),
@@ -181,8 +219,8 @@ class _PatchCenterScreenState extends State<PatchCenterScreen> {
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   OutlinedButton.icon(
-                    onPressed: () => _showEditFolderDialog(context, appState),
-                    icon: const Icon(Icons.edit, size: 13),
+                    onPressed: () => appState.pickOutputDirectory(),
+                    icon: const Icon(Icons.folder_open, size: 13),
                     label: const Text('CHANGE FOLDER', style: TextStyle(fontSize: 11)),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -233,57 +271,6 @@ class _PatchCenterScreenState extends State<PatchCenterScreen> {
     );
   }
 
-  void _showEditFolderDialog(BuildContext context, AppState appState) {
-    final controller = TextEditingController(text: appState.customOutputDirectory);
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: const Row(
-          children: [
-            Icon(Icons.folder, color: AppColors.primary, size: 20),
-            SizedBox(width: 8),
-            Text('Custom Rebuild Folder', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Specify the local folder where rebuilt and re-signed APKs will be saved:',
-              style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              decoration: const InputDecoration(
-                labelText: 'Output Directory Path',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.folder_open, color: AppColors.accent),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('CANCEL'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              final newPath = controller.text.trim();
-              if (newPath.isNotEmpty) {
-                appState.setOutputDirectory(newPath);
-              }
-              Navigator.pop(ctx);
-            },
-            child: const Text('SAVE FOLDER'),
-          ),
-        ],
-      ),
-    );
-  }
 
   Widget _buildCandidateCard(BuildContext context, PatchCandidate candidate) {
     return Container(

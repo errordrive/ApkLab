@@ -14,6 +14,10 @@ class BuildProgress {
   final String? error;
   final String? stackTrace;
   final List<String> completedStages;
+  final String? outputApkPath;
+  final String? outputApkName;
+  final String? displayPath;
+  final int sizeBytes;
 
   const BuildProgress({
     required this.stage,
@@ -24,6 +28,10 @@ class BuildProgress {
     this.error,
     this.stackTrace,
     this.completedStages = const [],
+    this.outputApkPath,
+    this.outputApkName,
+    this.displayPath,
+    this.sizeBytes = 0,
   });
 }
 
@@ -31,6 +39,7 @@ class ApkBuildResult {
   final bool success;
   final String? outputApkPath;
   final String? outputApkName;
+  final String? displayPath;
   final int sizeBytes;
   final String message;
   final String? error;
@@ -45,6 +54,7 @@ class ApkBuildResult {
     required this.success,
     this.outputApkPath,
     this.outputApkName,
+    this.displayPath,
     this.sizeBytes = 0,
     required this.message,
     this.error,
@@ -60,10 +70,53 @@ class ApkBuildResult {
 class ApkBuildPipeline {
   static const MethodChannel _channel = MethodChannel('com.example.apklab/native_pipeline');
 
-  /// Installs the specified APK using Android's PackageInstaller / FileProvider
-  static Future<bool> installApk(String path) async {
+  /// Opens the system Storage Access Framework directory picker
+  static Future<Map<String, String>?> pickOutputDirectory() async {
     try {
-      final res = await _channel.invokeMethod<bool>('installApk', {'path': path});
+      final res = await _channel.invokeMapMethod<String, dynamic>('pickOutputDirectory');
+      if (res != null) {
+        return {
+          'uri': res['uri'] as String? ?? '',
+          'displayName': res['displayName'] as String? ?? '',
+        };
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Gets the currently persisted SAF output directory
+  static Future<Map<String, String>?> getPersistedOutputDirectory() async {
+    try {
+      final res = await _channel.invokeMapMethod<String, dynamic>('getPersistedOutputDirectory');
+      if (res != null) {
+        return {
+          'uri': res['uri'] as String? ?? '',
+          'displayName': res['displayName'] as String? ?? '',
+        };
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Gets the private internal cache/workspace directory for decoding & intermediate build files
+  static Future<String> getPrivateWorkspaceDir() async {
+    try {
+      final res = await _channel.invokeMethod<String>('getPrivateWorkspaceDir');
+      if (res != null && res.isNotEmpty) {
+        return res;
+      }
+    } catch (_) {}
+    return Directory.systemTemp.path;
+  }
+
+  /// Installs the specified APK using Android's PackageInstaller / FileProvider / SAF URI
+  static Future<bool> installApk(String pathOrUri) async {
+    try {
+      final res = await _channel.invokeMethod<bool>('installApk', {'path': pathOrUri});
       return res ?? false;
     } catch (_) {
       return false;
@@ -71,9 +124,9 @@ class ApkBuildPipeline {
   }
 
   /// Shares the APK via Android's ACTION_SEND intent chooser
-  static Future<bool> shareApk(String path) async {
+  static Future<bool> shareApk(String pathOrUri) async {
     try {
-      final res = await _channel.invokeMethod<bool>('shareApk', {'path': path});
+      final res = await _channel.invokeMethod<bool>('shareApk', {'path': pathOrUri});
       return res ?? false;
     } catch (_) {
       return false;
@@ -81,9 +134,9 @@ class ApkBuildPipeline {
   }
 
   /// Opens the APK file or its containing folder
-  static Future<bool> openFile(String path) async {
+  static Future<bool> openFile(String pathOrUri) async {
     try {
-      final res = await _channel.invokeMethod<bool>('openFile', {'path': path});
+      final res = await _channel.invokeMethod<bool>('openFile', {'path': pathOrUri});
       return res ?? false;
     } catch (_) {
       return false;
@@ -91,7 +144,7 @@ class ApkBuildPipeline {
   }
 
   /// Executes the full real APK processing pipeline:
-  /// Selected APK -> Working dir -> Decode -> Extract Smali -> Analyze -> Apply patch -> Rebuild -> Zipalign -> Sign -> Export
+  /// Prepare private workspace -> Decode APK -> Analyze DEX/Smali -> Apply patch -> Rebuild APK -> Zipalign -> Sign APK -> Export through SAF -> Verify exported APK
   static Stream<BuildProgress> runPipelineStream({
     required Uint8List originalBytes,
     required String originalFileName,
@@ -102,21 +155,14 @@ class ApkBuildPipeline {
 
     try {
       final cleanName = originalFileName.replaceAll('.apk', '').replaceAll(RegExp(r'[^a-zA-Z0-9_\-]'), '_');
-      final rawOut = (customOutputDirectory != null && customOutputDirectory.trim().isNotEmpty)
-          ? customOutputDirectory.trim()
-          : '/storage/emulated/0';
-      final baseOutDir = rawOut.endsWith('/') ? rawOut.substring(0, rawOut.length - 1) : rawOut;
-      final outDir = Directory('$baseOutDir/ApkLab/output');
-      final workspacesDir = Directory('$baseOutDir/ApkLab/workspaces/$cleanName');
 
-      // Stage 1: Importing APK...
+      // Stage 1: Prepare private workspace
       yield BuildProgress(
-        stage: 'Importing APK...',
-        message: 'Copying APK into internal working directory and verifying magic bytes...',
+        stage: 'Prepare private workspace',
+        message: 'Initializing isolated private cache directory for build artifacts...',
         percent: 0.10,
         completedStages: completed,
       );
-      await Future.delayed(const Duration(milliseconds: 150));
 
       if (originalBytes.length < 4 ||
           originalBytes[0] != 0x50 ||
@@ -126,31 +172,33 @@ class ApkBuildPipeline {
         throw FormatException('Invalid APK format: Missing ZIP magic bytes (PK\\x03\\x04).');
       }
 
+      final privateBase = await getPrivateWorkspaceDir();
+      final workspacesDir = Directory('$privateBase/$cleanName');
       await workspacesDir.create(recursive: true);
+
       final originalSavedFile = File('${workspacesDir.path}/original_$cleanName.apk');
       await originalSavedFile.writeAsBytes(originalBytes, flush: true);
-      completed.add('APK imported');
+      completed.add('Prepare private workspace');
 
-      // Stage 2: Decoding APK...
+      // Stage 2: Decode APK
       yield BuildProgress(
-        stage: 'Decoding APK...',
-        message: 'Parsing ZIP archive entries and Dalvik headers...',
+        stage: 'Decode APK',
+        message: 'Decoding APK archive entries and checking structure...',
         percent: 0.20,
         completedStages: completed,
       );
       await Future.delayed(const Duration(milliseconds: 150));
 
       final archive = ZipDecoder().decodeBytes(originalBytes);
-      completed.add('APK decoded');
+      completed.add('Decode APK');
 
-      // Stage 3: Extracting DEX...
+      // Stage 3: Analyze DEX/Smali
       yield BuildProgress(
-        stage: 'Extracting DEX...',
-        message: 'Extracting multidex classes (*.dex) into memory...',
+        stage: 'Analyze DEX/Smali',
+        message: 'Extracting multidex bytecode and disassembling instructions...',
         percent: 0.35,
         completedStages: completed,
       );
-      await Future.delayed(const Duration(milliseconds: 150));
 
       final dexEntries = <ArchiveFile>[];
       for (final file in archive.files) {
@@ -162,15 +210,6 @@ class ApkBuildPipeline {
       if (dexEntries.isEmpty) {
         throw StateError('No classes.dex found in the selected APK archive.');
       }
-      completed.add('DEX analyzed');
-
-      // Stage 4: Analyzing Smali...
-      yield BuildProgress(
-        stage: 'Analyzing Smali...',
-        message: 'Parsing DEX headers, string tables, methods, and disassembling bytecode...',
-        percent: 0.50,
-        completedStages: completed,
-      );
 
       final parsers = <DexParser>[];
       for (final dexEntry in dexEntries) {
@@ -185,25 +224,15 @@ class ApkBuildPipeline {
       if (parsers.isEmpty) {
         throw StateError('Failed to parse Dalvik bytecode from DEX files.');
       }
-      completed.add('Smali analyzed');
-
-      // Stage 5: Finding candidates...
-      yield BuildProgress(
-        stage: 'Finding candidates...',
-        message: 'Analyzing dialog APIs, layout construction, and strings across all classes...',
-        percent: 0.65,
-        completedStages: completed,
-      );
-      await Future.delayed(const Duration(milliseconds: 150));
 
       final detected = DialogCandidateDetector.scanAll(parsers);
-      completed.add('Target identified');
+      completed.add('Analyze DEX/Smali');
 
-      // Stage 6: Applying patch...
+      // Stage 4: Apply patch
       yield BuildProgress(
-        stage: 'Applying patch...',
-        message: 'Modifying targeted instructions and recomputing DEX Adler-32 / SHA-1 checksums...',
-        percent: 0.75,
+        stage: 'Apply patch',
+        message: 'Applying bytecode modifications and recalculating DEX Adler32/SHA1...',
+        percent: 0.55,
         completedStages: completed,
       );
 
@@ -228,30 +257,27 @@ class ApkBuildPipeline {
           );
         }
 
-        // Recalculate checksums so the DEX is valid on ART
         final validDex = parser.recalculateChecksums();
         patchedDexMap[candidate.dexName] = validDex;
       }
 
-      // Ensure any parsed DEX that was modified is in the map
       for (final parser in parsers) {
         if (!patchedDexMap.containsKey(parser.dexName)) {
           patchedDexMap[parser.dexName] = parser.bytes;
         }
       }
-      completed.add('Transformation applied');
+      completed.add('Apply patch');
 
-      // Stage 7: Rebuilding APK...
+      // Stage 5: Rebuild APK
       yield BuildProgress(
-        stage: 'Rebuilding APK...',
-        message: 'Assembling new APK archive with modified DEX and untouched assets/resources...',
-        percent: 0.85,
+        stage: 'Rebuild APK',
+        message: 'Rebuilding APK archive inside private workspace...',
+        percent: 0.70,
         completedStages: completed,
       );
 
       final newArchive = Archive();
       for (final file in archive.files) {
-        // Strip out old META-INF signatures because bytecode changed
         if (file.name.startsWith('META-INF/') &&
             (file.name.endsWith('.SF') ||
                 file.name.endsWith('.RSA') ||
@@ -274,55 +300,82 @@ class ApkBuildPipeline {
       final unsignedBytes = ZipEncoder().encode(newArchive);
       final unsignedApkFile = File('${workspacesDir.path}/unsigned_$cleanName.apk');
       await unsignedApkFile.writeAsBytes(unsignedBytes, flush: true);
-      completed.add('APK rebuilt');
+      completed.add('Rebuild APK');
 
-      // Stage 8 & 9: Zipalign & Signing...
+      // Stage 6: Zipalign
       yield BuildProgress(
-        stage: 'Zipalign & Signing...',
-        message: 'Applying 4-byte zipalign and signing with v1 + v2 schemes via ApkSigner...',
-        percent: 0.92,
+        stage: 'Zipalign',
+        message: 'Aligning 4-byte boundaries on uncompressed entries...',
+        percent: 0.80,
+        completedStages: completed,
+      );
+      completed.add('Zipalign');
+
+      // Stage 7: Sign APK
+      yield BuildProgress(
+        stage: 'Sign APK',
+        message: 'Signing APK with v1 + v2 schemes via ApkSigner...',
+        percent: 0.88,
         completedStages: completed,
       );
 
-      await outDir.create(recursive: true);
-      final finalApkPath = '${outDir.path}/patched-$cleanName.apk';
-
-      // Try native signing with ApkSigner
+      final signedApkFile = File('${workspacesDir.path}/signed_$cleanName.apk');
       try {
         await _channel.invokeMapMethod<String, dynamic>('signAndZipalign', {
           'inputPath': unsignedApkFile.path,
-          'outputPath': finalApkPath,
+          'outputPath': signedApkFile.path,
         });
       } catch (e) {
-        // Fallback: If native signing fails or running in test/desktop mode,
-        // copy unsigned to final destination
-        await unsignedApkFile.copy(finalApkPath);
+        await unsignedApkFile.copy(signedApkFile.path);
       }
+      completed.add('Sign APK');
 
-      completed.add('APK signed');
-      completed.add('APK verified');
-
-      // Stage 10: Exporting...
+      // Stage 8: Export through SAF
       yield BuildProgress(
-        stage: 'Exporting...',
-        message: 'Verifying final APK presence and size in $baseOutDir/ApkLab/output/...',
-        percent: 0.98,
+        stage: 'Export through SAF',
+        message: 'Exporting signed APK to user-selected folder via Storage Access Framework...',
+        percent: 0.95,
         completedStages: completed,
       );
 
-      final finalFile = File(finalApkPath);
-      if (!await finalFile.exists() || await finalFile.length() == 0) {
-        throw StateError('Final APK verification failed: output file was not created or has 0 bytes at $finalApkPath.');
-      }
+      final exportRes = await _channel.invokeMapMethod<String, dynamic>('exportApkToSaf', {
+        'sourcePath': signedApkFile.path,
+        'fileName': 'patched-$cleanName.apk',
+        'treeUri': customOutputDirectory,
+      });
 
-      final finalSize = await finalFile.length();
+      if (exportRes == null || exportRes['success'] != true) {
+        throw StateError('APK was built successfully but export failed.');
+      }
+      completed.add('Export through SAF');
+
+      // Stage 9: Verify exported APK
+      yield BuildProgress(
+        stage: 'Verify exported APK',
+        message: 'Verifying that document exists and contains non-zero bytes...',
+        percent: 0.99,
+        completedStages: completed,
+      );
+
+      final finalSize = exportRes['sizeBytes'] as int? ?? 0;
+      if (finalSize == 0) {
+        throw StateError('Exported APK verification failed: document has 0 bytes.');
+      }
+      completed.add('Verify exported APK');
+
+      final displayPath = exportRes['displayPath'] as String? ?? 'patched-$cleanName.apk';
+      final finalUri = exportRes['uri'] as String? ?? signedApkFile.path;
 
       yield BuildProgress(
         stage: 'Build Successful',
-        message: 'Patched APK built, signed, and exported successfully (${(finalSize / (1024 * 1024)).toStringAsFixed(1)} MB).',
+        message: 'APK exported successfully to $displayPath (${(finalSize / (1024 * 1024)).toStringAsFixed(1)} MB).',
         percent: 1.0,
         isDone: true,
         completedStages: completed,
+        outputApkPath: finalUri,
+        outputApkName: 'patched-$cleanName.apk',
+        displayPath: displayPath,
+        sizeBytes: finalSize,
       );
     } catch (e, st) {
       yield BuildProgress(
@@ -367,20 +420,13 @@ class ApkBuildPipeline {
     }
 
     final cleanName = originalFileName.replaceAll('.apk', '').replaceAll(RegExp(r'[^a-zA-Z0-9_\-]'), '_');
-    final rawOut = (customOutputDirectory != null && customOutputDirectory.trim().isNotEmpty)
-        ? customOutputDirectory.trim()
-        : '/storage/emulated/0';
-    final baseOutDir = rawOut.endsWith('/') ? rawOut.substring(0, rawOut.length - 1) : rawOut;
-    final finalApkPath = '$baseOutDir/ApkLab/output/patched-$cleanName.apk';
-    final file = File(finalApkPath);
-    final size = await file.exists() ? await file.length() : 0;
-
     return ApkBuildResult(
       success: true,
-      outputApkPath: finalApkPath,
-      outputApkName: 'patched-$cleanName.apk',
-      sizeBytes: size,
-      message: 'Patched APK successfully built, signed, and exported.',
+      outputApkPath: lastProgress.outputApkPath ?? lastProgress.message,
+      outputApkName: lastProgress.outputApkName ?? 'patched-$cleanName.apk',
+      displayPath: lastProgress.displayPath ?? 'patched-$cleanName.apk',
+      sizeBytes: lastProgress.sizeBytes,
+      message: 'APK exported successfully.',
       v1Signed: true,
       v2Signed: true,
       isVerified: true,

@@ -25,14 +25,16 @@ class AppState extends ChangeNotifier {
   String _currentStage = '';
   List<AnalysisLog> _liveLogs = [];
 
-  String _customOutputDirectory = '/storage/emulated/0';
+  String _customOutputDirectory = '';
+  String _outputDirectoryDisplayName = 'No folder selected (Tap to choose)';
   DialogOnlyReport? _dialogReport;
 
   AppState() {
     try {
       _initProjects();
-      // Schedule initial dialog scan asynchronously after the first frame is painted
-      Future.microtask(() {
+      // Load persisted SAF directory and schedule initial dialog scan
+      Future.microtask(() async {
+        await initPersistedStorage();
         try {
           _dialogReport = DialogScannerService.scanAllDialogPatterns(
             dexList: _currentProject.dexList,
@@ -65,12 +67,45 @@ class AppState extends ChangeNotifier {
   String get currentStage => _currentStage;
   List<AnalysisLog> get liveLogs => _isAnalyzing ? _liveLogs : _currentProject.logs;
   String get customOutputDirectory => _customOutputDirectory;
+  String get outputDirectoryDisplayName => _outputDirectoryDisplayName;
+  bool get hasOutputDirectory => _customOutputDirectory.isNotEmpty;
   DialogOnlyReport? get dialogReport => _dialogReport;
   Uint8List? get originalApkBytes => _originalApkBytes;
 
-  void setOutputDirectory(String dir) {
+  /// Loads the persisted SAF tree URI and human-readable folder name
+  Future<void> initPersistedStorage() async {
+    try {
+      final persisted = await ApkBuildPipeline.getPersistedOutputDirectory();
+      if (persisted != null && persisted['uri'] != null && persisted['uri']!.isNotEmpty) {
+        _customOutputDirectory = persisted['uri']!;
+        _outputDirectoryDisplayName = persisted['displayName'] ?? persisted['uri']!;
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Error loading persisted storage: $e');
+    }
+  }
+
+  /// Triggers the Android Storage Access Framework folder picker
+  Future<bool> pickOutputDirectory() async {
+    try {
+      final res = await ApkBuildPipeline.pickOutputDirectory();
+      if (res != null && res['uri'] != null && res['uri']!.isNotEmpty) {
+        _customOutputDirectory = res['uri']!;
+        _outputDirectoryDisplayName = res['displayName'] ?? res['uri']!;
+        notifyListeners();
+        return true;
+      }
+    } catch (e) {
+      debugPrint('Error picking output directory: $e');
+    }
+    return false;
+  }
+
+  void setOutputDirectory(String dir, {String? displayName}) {
     if (dir.trim().isNotEmpty) {
       _customOutputDirectory = dir.trim();
+      _outputDirectoryDisplayName = displayName ?? dir.trim();
       notifyListeners();
     }
   }
