@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:isolate';
 import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import '../../core/utils/security_utils.dart';
@@ -11,6 +12,19 @@ import '../../domain/models/analysis_log.dart';
 import '../../domain/models/project.dart';
 import 'dex_parser.dart';
 import 'dialog_candidate_detector.dart';
+import 'dialog_scanner_service.dart';
+
+class AnalyzedProjectResult {
+  final ApkProject project;
+  final DialogOnlyReport dialogReport;
+  final List<AnalysisLog> additionalLogs;
+
+  const AnalyzedProjectResult({
+    required this.project,
+    required this.dialogReport,
+    this.additionalLogs = const [],
+  });
+}
 
 class ApkAnalyzerService {
   /// Runs the full 11-step analysis pipeline as described in the PRD
@@ -49,7 +63,7 @@ class ApkAnalyzerService {
       progressPercent: 12,
     );
 
-    // Step 2: APK Extraction & Zip-slip validation
+    // Step 2: APK Extraction & Zip-slip validation (offloaded to background isolate)
     yield AnalysisLog(
       timestamp: DateTime.now(),
       stage: 'APK Extraction',
@@ -59,22 +73,25 @@ class ApkAnalyzerService {
     );
     await Future.delayed(const Duration(milliseconds: 300));
 
-    Archive archive;
-    try {
-      archive = ZipDecoder().decodeBytes(bytes);
-    } catch (e) {
+    final validationResult = await Isolate.run(() {
+      try {
+        final arc = ZipDecoder().decodeBytes(bytes);
+        final safe = SecurityUtils.validateZipStructure(arc);
+        return {'success': true, 'safe': safe, 'fileCount': arc.files.length};
+      } catch (e) {
+        return {'success': false, 'error': e.toString(), 'fileCount': 0};
+      }
+    });
+
+    if (validationResult['success'] != true) {
       yield AnalysisLog(
         timestamp: DateTime.now(),
         stage: 'APK Extraction',
-        message: 'Archive decoding warning: $e. Proceeding with safe subset.',
+        message: 'Archive decoding warning: ${validationResult['error']}. Proceeding with safe subset.',
         level: LogLevel.warning,
         progressPercent: 20,
       );
-      archive = Archive();
-    }
-
-    final isSafe = SecurityUtils.validateZipStructure(archive);
-    if (!isSafe) {
+    } else if (validationResult['safe'] != true) {
       yield AnalysisLog(
         timestamp: DateTime.now(),
         stage: 'APK Extraction',
@@ -83,16 +100,17 @@ class ApkAnalyzerService {
         progressPercent: 20,
       );
       return;
+    } else {
+      final fileCount = validationResult['fileCount'] as int? ?? 0;
+      yield AnalysisLog(
+        timestamp: DateTime.now(),
+        stage: 'APK Extraction',
+        message: 'Extraction sandbox verified. Extracted $fileCount archive entries safely.',
+        level: LogLevel.success,
+        progressPercent: 28,
+        processedFiles: fileCount,
+      );
     }
-
-    yield AnalysisLog(
-      timestamp: DateTime.now(),
-      stage: 'APK Extraction',
-      message: 'Extraction sandbox verified. Extracted ${archive.files.length} archive entries safely.',
-      level: LogLevel.success,
-      progressPercent: 28,
-      processedFiles: archive.files.length,
-    );
 
     // Step 3: Manifest Analysis
     yield AnalysisLog(
@@ -199,6 +217,34 @@ class ApkAnalyzerService {
       level: LogLevel.success,
       progressPercent: 100,
     );
+  }
+
+  /// Asynchronously builds the analyzed project and performs multi-signal dialog scanning
+  /// entirely inside a background worker isolate, ensuring the Flutter UI isolate remains
+  /// responsive at 60 FPS without ever triggering an ANR.
+  static Future<AnalyzedProjectResult> buildAnalyzedProjectAsync({
+    required String fileName,
+    required Uint8List bytes,
+    List<AnalysisLog> logs = const [],
+  }) async {
+    return await Isolate.run(() {
+      final extraLogs = <AnalysisLog>[];
+      final project = buildAnalyzedProject(
+        fileName: fileName,
+        bytes: bytes,
+        logs: extraLogs,
+      );
+      final report = DialogScannerService.scanAllDialogPatterns(
+        dexList: project.dexList,
+        smaliFiles: project.smaliFiles,
+        packageName: project.apkInfo.packageName,
+      );
+      return AnalyzedProjectResult(
+        project: project,
+        dialogReport: report,
+        additionalLogs: extraLogs,
+      );
+    });
   }
 
   /// Builds a completed project from parsed APK details using real DEX extraction

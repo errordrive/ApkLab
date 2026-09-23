@@ -7,10 +7,18 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
+import java.util.concurrent.Executors
+
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.example.apklab/native_pipeline"
     private var pendingFolderResult: MethodChannel.Result? = null
     private val REQUEST_CODE_PICK_FOLDER = 9001
+    private val backgroundExecutor = Executors.newFixedThreadPool(4)
+
+    override fun onDestroy() {
+        super.onDestroy()
+        backgroundExecutor.shutdown()
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -41,11 +49,13 @@ class MainActivity : FlutterActivity() {
                     val fileName = call.argument<String>("fileName")
                     val treeUri = call.argument<String>("treeUri")
                     if (sourcePath != null && fileName != null) {
-                        try {
-                            val exportResult = NativePipeline.exportApkToSaf(this, sourcePath, fileName, treeUri)
-                            result.success(exportResult)
-                        } catch (e: Exception) {
-                            result.error("EXPORT_ERROR", e.message, e.stackTraceToString())
+                        backgroundExecutor.execute {
+                            try {
+                                val exportResult = NativePipeline.exportApkToSaf(this@MainActivity, sourcePath, fileName, treeUri)
+                                runOnUiThread { result.success(exportResult) }
+                            } catch (e: Exception) {
+                                runOnUiThread { result.error("EXPORT_ERROR", e.message, e.stackTraceToString()) }
+                            }
                         }
                     } else {
                         result.error("INVALID_ARGS", "sourcePath and fileName are required", null)
@@ -94,11 +104,13 @@ class MainActivity : FlutterActivity() {
                     val inputPath = call.argument<String>("inputPath")
                     val outputPath = call.argument<String>("outputPath")
                     if (inputPath != null && outputPath != null) {
-                        try {
-                            val res = NativePipeline.zipalignApk(inputPath, outputPath)
-                            result.success(res)
-                        } catch (e: Exception) {
-                            result.error("ZIPALIGN_ERROR", e.message, e.stackTraceToString())
+                        backgroundExecutor.execute {
+                            try {
+                                val res = NativePipeline.zipalignApk(inputPath, outputPath)
+                                runOnUiThread { result.success(res) }
+                            } catch (e: Exception) {
+                                runOnUiThread { result.error("ZIPALIGN_ERROR", e.message, e.stackTraceToString()) }
+                            }
                         }
                     } else {
                         result.error("INVALID_ARGS", "inputPath and outputPath are required", null)
@@ -107,11 +119,13 @@ class MainActivity : FlutterActivity() {
                 "verifyZipAlignment" -> {
                     val apkPath = call.argument<String>("apkPath")
                     if (apkPath != null) {
-                        try {
-                            val res = NativePipeline.verifyZipAlignment(apkPath)
-                            result.success(res)
-                        } catch (e: Exception) {
-                            result.error("ALIGN_VERIFY_ERROR", e.message, e.stackTraceToString())
+                        backgroundExecutor.execute {
+                            try {
+                                val res = NativePipeline.verifyZipAlignment(apkPath)
+                                runOnUiThread { result.success(res) }
+                            } catch (e: Exception) {
+                                runOnUiThread { result.error("ALIGN_VERIFY_ERROR", e.message, e.stackTraceToString()) }
+                            }
                         }
                     } else {
                         result.error("INVALID_ARGS", "apkPath is required", null)
@@ -124,14 +138,16 @@ class MainActivity : FlutterActivity() {
                     val customKeystorePass = call.argument<String>("customKeystorePass")
                     val customKeyAlias = call.argument<String>("customKeyAlias")
                     if (inputPath != null && outputPath != null) {
-                        try {
-                            val signResult = NativePipeline.signApk(
-                                this, inputPath, outputPath,
-                                customKeystorePath, customKeystorePass, customKeyAlias
-                            )
-                            result.success(signResult)
-                        } catch (e: Exception) {
-                            result.error("SIGN_ERROR", e.message, e.stackTraceToString())
+                        backgroundExecutor.execute {
+                            try {
+                                val signResult = NativePipeline.signApk(
+                                    this@MainActivity, inputPath, outputPath,
+                                    customKeystorePath, customKeystorePass, customKeyAlias
+                                )
+                                runOnUiThread { result.success(signResult) }
+                            } catch (e: Exception) {
+                                runOnUiThread { result.error("SIGN_ERROR", e.message, e.stackTraceToString()) }
+                            }
                         }
                     } else {
                         result.error("INVALID_ARGS", "inputPath and outputPath are required", null)
@@ -140,11 +156,13 @@ class MainActivity : FlutterActivity() {
                 "verifySignature" -> {
                     val apkPath = call.argument<String>("apkPath")
                     if (apkPath != null) {
-                        try {
-                            val res = NativePipeline.verifySignature(apkPath)
-                            result.success(res)
-                        } catch (e: Exception) {
-                            result.error("VERIFY_ERROR", e.message, e.stackTraceToString())
+                        backgroundExecutor.execute {
+                            try {
+                                val res = NativePipeline.verifySignature(apkPath)
+                                runOnUiThread { result.success(res) }
+                            } catch (e: Exception) {
+                                runOnUiThread { result.error("VERIFY_ERROR", e.message, e.stackTraceToString()) }
+                            }
                         }
                     } else {
                         result.error("INVALID_ARGS", "apkPath is required", null)
@@ -152,22 +170,26 @@ class MainActivity : FlutterActivity() {
                 }
                 "captureRuntimeDiagnostics" -> {
                     val packageName = call.argument<String>("packageName") ?: ""
-                    try {
-                        val res = NativePipeline.captureRuntimeDiagnostics(packageName)
-                        result.success(res)
-                    } catch (e: Exception) {
-                        result.error("DIAGNOSTIC_ERROR", e.message, e.stackTraceToString())
+                    backgroundExecutor.execute {
+                        try {
+                            val res = NativePipeline.captureRuntimeDiagnostics(packageName)
+                            runOnUiThread { result.success(res) }
+                        } catch (e: Exception) {
+                            runOnUiThread { result.error("DIAGNOSTIC_ERROR", e.message, e.stackTraceToString()) }
+                        }
                     }
                 }
                 "signAndZipalign" -> {
                     val inputPath = call.argument<String>("inputPath")
                     val outputPath = call.argument<String>("outputPath")
                     if (inputPath != null && outputPath != null) {
-                        try {
-                            val signResult = NativePipeline.signAndZipalign(this, inputPath, outputPath)
-                            result.success(signResult)
-                        } catch (e: Exception) {
-                            result.error("SIGN_ERROR", e.message, e.stackTraceToString())
+                        backgroundExecutor.execute {
+                            try {
+                                val signResult = NativePipeline.signAndZipalign(this@MainActivity, inputPath, outputPath)
+                                runOnUiThread { result.success(signResult) }
+                            } catch (e: Exception) {
+                                runOnUiThread { result.error("SIGN_ERROR", e.message, e.stackTraceToString()) }
+                            }
                         }
                     } else {
                         result.error("INVALID_ARGS", "inputPath and outputPath are required", null)

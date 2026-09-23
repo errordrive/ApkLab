@@ -1,11 +1,22 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'package:archive/archive.dart';
 import 'package:flutter/services.dart';
 import 'apk_validator.dart';
 import 'dex_parser.dart';
 import 'dialog_candidate_detector.dart';
+
+class ApkParsedInventory {
+  final ApkInventory inventory;
+  final Map<String, Uint8List> dexFiles;
+
+  const ApkParsedInventory({
+    required this.inventory,
+    required this.dexFiles,
+  });
+}
 
 class BuildProgress {
   final String stage;
@@ -214,6 +225,60 @@ class ApkBuildPipeline {
     return res ?? {};
   }
 
+  /// Decodes an APK archive and extracts its inventory and DEX bytes inside a background isolate
+  static ApkParsedInventory _decodeAndExtractDex(Uint8List apkBytes) {
+    final archive = ZipDecoder().decodeBytes(apkBytes);
+    final inventory = ApkInventory.fromArchive(archive);
+    final dexFiles = <String, Uint8List>{};
+    for (final file in archive.files) {
+      if (file.name.endsWith('.dex')) {
+        dexFiles[file.name] = Uint8List.fromList(file.content as List<int>);
+      }
+    }
+    return ApkParsedInventory(
+      inventory: inventory,
+      dexFiles: dexFiles,
+    );
+  }
+
+  /// Rebuilds an unsigned APK archive in a background worker isolate, preserving
+  /// STORED uncompressed formats for resources.arsc and native libraries (*.so)
+  static Uint8List _buildUnsignedApkArchive({
+    required Uint8List originalBytes,
+    required Map<String, Uint8List> patchedDexMap,
+  }) {
+    final originalArchive = ZipDecoder().decodeBytes(originalBytes);
+    final newArchive = Archive();
+    for (final file in originalArchive.files) {
+      // Strip old signature files
+      if (file.name.startsWith('META-INF/') &&
+          (file.name.endsWith('.SF') ||
+              file.name.endsWith('.RSA') ||
+              file.name.endsWith('.DSA') ||
+              file.name.endsWith('.EC') ||
+              file.name == 'META-INF/MANIFEST.MF')) {
+        continue;
+      }
+
+      final isStored = file.name == 'resources.arsc' ||
+          (file.name.startsWith('lib/') && file.name.endsWith('.so')) ||
+          file.compression == CompressionType.none;
+
+      if (patchedDexMap.containsKey(file.name)) {
+        final modifiedData = patchedDexMap[file.name]!;
+        final newFile = ArchiveFile(file.name, modifiedData.length, modifiedData);
+        newFile.compression = CompressionType.deflate; // DEX files are deflated
+        newArchive.addFile(newFile);
+      } else {
+        file.compression = isStored ? CompressionType.none : CompressionType.deflate;
+        newArchive.addFile(file);
+      }
+    }
+
+    final encoded = ZipEncoder().encode(newArchive);
+    return Uint8List.fromList(encoded);
+  }
+
   /// Executes the complete 12-stage rebuild and validation pipeline:
   /// 1. Prepare private workspace
   /// 2. Decode APK & extract original inventory
@@ -276,10 +341,10 @@ class ApkBuildPipeline {
         completedStages: completed,
         workspacePath: workspacesDir.path,
       );
-      await Future.delayed(const Duration(milliseconds: 100));
+      await Future.delayed(const Duration(milliseconds: 50));
 
-      final originalArchive = ZipDecoder().decodeBytes(originalBytes);
-      final originalInventory = ApkInventory.fromArchive(originalArchive);
+      final originalData = await Isolate.run(() => _decodeAndExtractDex(originalBytes));
+      final originalInventory = originalData.inventory;
       completed.add('Decode APK');
 
       // Stage 3: Analyze DEX/Smali
@@ -290,26 +355,20 @@ class ApkBuildPipeline {
         completedStages: completed,
         workspacePath: workspacesDir.path,
       );
+      await Future.delayed(const Duration(milliseconds: 50));
 
-      final dexEntries = <ArchiveFile>[];
-      for (final file in originalArchive.files) {
-        if (file.name.endsWith('.dex')) {
-          dexEntries.add(file);
-        }
-      }
-
-      if (dexEntries.isEmpty) {
+      if (originalData.dexFiles.isEmpty) {
         throw StateError('No classes.dex found in the selected APK archive.');
       }
 
       final parsers = <DexParser>[];
-      for (final dexEntry in dexEntries) {
-        final dexBytes = Uint8List.fromList(dexEntry.content as List<int>);
-        final parser = DexParser(dexName: dexEntry.name, bytes: dexBytes);
+      for (final entry in originalData.dexFiles.entries) {
+        final parser = DexParser(dexName: entry.key, bytes: entry.value);
         final ok = parser.parse();
         if (ok) {
           parsers.add(parser);
         }
+        await Future.delayed(Duration.zero);
       }
 
       if (parsers.isEmpty) {
@@ -317,6 +376,7 @@ class ApkBuildPipeline {
       }
 
       final detected = DialogCandidateDetector.scanAll(parsers);
+      await Future.delayed(Duration.zero);
       completed.add('Analyze DEX/Smali');
 
       // Stage 4: Controlled transformation
@@ -327,6 +387,7 @@ class ApkBuildPipeline {
         completedStages: completed,
         workspacePath: workspacesDir.path,
       );
+      await Future.delayed(const Duration(milliseconds: 50));
 
       final toApply = patchesToApply.isNotEmpty ? patchesToApply : detected;
       final patchedDexMap = <String, Uint8List>{};
@@ -384,6 +445,7 @@ class ApkBuildPipeline {
           patchedDexMap[candidate.dexName] = validDex;
           successfullyApplied.add(candidate);
         }
+        await Future.delayed(Duration.zero);
       }
 
       for (final parser in parsers) {
@@ -392,6 +454,7 @@ class ApkBuildPipeline {
         }
       }
       completed.add('Apply patch');
+      await Future.delayed(Duration.zero);
 
       // Stage 5: Rebuild APK (Preserving STORED compression for resources.arsc & lib/*.so)
       yield BuildProgress(
@@ -401,35 +464,14 @@ class ApkBuildPipeline {
         completedStages: completed,
         workspacePath: workspacesDir.path,
       );
+      await Future.delayed(const Duration(milliseconds: 50));
 
-      final newArchive = Archive();
-      for (final file in originalArchive.files) {
-        // Strip old signature files
-        if (file.name.startsWith('META-INF/') &&
-            (file.name.endsWith('.SF') ||
-                file.name.endsWith('.RSA') ||
-                file.name.endsWith('.DSA') ||
-                file.name.endsWith('.EC') ||
-                file.name == 'META-INF/MANIFEST.MF')) {
-          continue;
-        }
-
-        final isStored = file.name == 'resources.arsc' ||
-            (file.name.startsWith('lib/') && file.name.endsWith('.so')) ||
-            file.compression == CompressionType.none;
-
-        if (patchedDexMap.containsKey(file.name)) {
-          final modifiedData = patchedDexMap[file.name]!;
-          final newFile = ArchiveFile(file.name, modifiedData.length, modifiedData);
-          newFile.compression = CompressionType.deflate; // DEX files are deflated
-          newArchive.addFile(newFile);
-        } else {
-          file.compression = isStored ? CompressionType.none : CompressionType.deflate;
-          newArchive.addFile(file);
-        }
-      }
-
-      final unsignedBytes = ZipEncoder().encode(newArchive);
+      final unsignedBytes = await Isolate.run(() {
+        return _buildUnsignedApkArchive(
+          originalBytes: originalBytes,
+          patchedDexMap: patchedDexMap,
+        );
+      });
       final unsignedApkFile = File('${workspacesDir.path}/rebuilt-unsigned.apk');
       await unsignedApkFile.writeAsBytes(unsignedBytes, flush: true);
       completed.add('Rebuild APK');
@@ -442,9 +484,11 @@ class ApkBuildPipeline {
         completedStages: completed,
         workspacePath: workspacesDir.path,
       );
+      await Future.delayed(const Duration(milliseconds: 50));
 
-      final rebuiltArchive = ZipDecoder().decodeBytes(unsignedBytes);
-      final rebuiltInventory = ApkInventory.fromArchive(rebuiltArchive);
+      final rebuiltData = await Isolate.run(() => _decodeAndExtractDex(unsignedBytes));
+      final rebuiltInventory = rebuiltData.inventory;
+      completed.add('Structural validation');
 
       // Stage 7: DEX Validation
       yield BuildProgress(
@@ -454,16 +498,17 @@ class ApkBuildPipeline {
         completedStages: completed,
         workspacePath: workspacesDir.path,
       );
+      await Future.delayed(const Duration(milliseconds: 50));
 
       final rebuiltParsers = <DexParser>[];
-      for (final file in rebuiltArchive.files) {
-        if (file.name.endsWith('.dex')) {
-          final p = DexParser(dexName: file.name, bytes: Uint8List.fromList(file.content as List<int>));
-          if (p.parse()) {
-            rebuiltParsers.add(p);
-          }
+      for (final entry in rebuiltData.dexFiles.entries) {
+        final p = DexParser(dexName: entry.key, bytes: entry.value);
+        if (p.parse()) {
+          rebuiltParsers.add(p);
         }
+        await Future.delayed(Duration.zero);
       }
+      completed.add('DEX validation');
 
       // Stage 8: APK Alignment (Zipalign)
       yield BuildProgress(

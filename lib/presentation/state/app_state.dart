@@ -188,22 +188,40 @@ class AppState extends ChangeNotifier {
           logsCollector.add(log);
           notifyListeners();
         },
-        onDone: () {
-          _isAnalyzing = false;
-          final newProject = ApkAnalyzerService.buildAnalyzedProject(
-            fileName: fileName,
-            bytes: bytes,
-            logs: logsCollector,
-          );
-          _projects.insert(0, newProject);
-          _currentProject = newProject;
-          _dialogReport = DialogScannerService.scanAllDialogPatterns(
-            dexList: newProject.dexList,
-            smaliFiles: newProject.smaliFiles,
-            packageName: newProject.apkInfo.packageName,
-          );
-          _selectedNavIndex = 8; // Navigate to Report view once analysis completes
+        onDone: () async {
+          _currentStage = 'Indexing Dalvik bytecode & Smali...';
+          _currentProgressPercent = 95;
           notifyListeners();
+
+          try {
+            final result = await ApkAnalyzerService.buildAnalyzedProjectAsync(
+              fileName: fileName,
+              bytes: bytes,
+              logs: logsCollector,
+            );
+
+            _projects.insert(0, result.project);
+            _currentProject = result.project;
+            _dialogReport = result.dialogReport;
+            if (result.additionalLogs.isNotEmpty) {
+              _liveLogs.addAll(result.additionalLogs);
+            }
+            _selectedNavIndex = 8; // Navigate to Report view once analysis completes
+          } catch (e, st) {
+            debugPrint('Failed to build analyzed project: $e\n$st');
+            _liveLogs.add(
+              AnalysisLog(
+                timestamp: DateTime.now(),
+                stage: 'Error',
+                message: 'Failed to build analyzed project: $e',
+                level: LogLevel.error,
+                progressPercent: _currentProgressPercent,
+              ),
+            );
+          } finally {
+            _isAnalyzing = false;
+            notifyListeners();
+          }
         },
         onError: (e) {
           _isAnalyzing = false;
