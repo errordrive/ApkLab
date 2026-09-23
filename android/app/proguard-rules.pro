@@ -13,3 +13,5 @@
 
 # Preserve native pipeline classes
 -keep class com.example.apklab.** { *; }
+
+-dontoptimize
