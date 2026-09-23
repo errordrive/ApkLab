@@ -225,19 +225,45 @@ class MultiSignalDialogEngine {
     'mod by',
     'reverse engineer',
     'reverse-engineered',
-    'credits',
-    'credit',
-    'telegram',
-    't.me/',
-    'channel',
-    'cracked',
-    'repacked',
     'hacked by',
-    'modder',
-    'author',
+    'cracked by',
+    'repacked by',
     'vip mod',
+    't.me/',
+    'telegram.me/',
+    'join telegram',
+    'telegram channel',
+    'sub to channel',
+    'join our channel',
     'dialogbox',
   ];
+
+  /// Checks if a class is an internal Android, Jetpack, Kotlin, or common 3rd-party library class
+  static bool _isFrameworkOrLibraryClass(String classDesc) {
+    final lower = classDesc.toLowerCase();
+    // Injected modder classes like Landroid/app/dialogbox; or Lcom/.../DialogBox; must still be analyzed
+    if (lower.contains('dialogbox') || lower.contains('dialog_box')) {
+      return false;
+    }
+    return classDesc.startsWith('Landroid/support/') ||
+        classDesc.startsWith('Landroidx/') ||
+        classDesc.startsWith('Lcom/google/android/gms/') ||
+        classDesc.startsWith('Lcom/google/android/material/') ||
+        classDesc.startsWith('Lcom/google/firebase/') ||
+        classDesc.startsWith('Lkotlin/') ||
+        classDesc.startsWith('Lkotlinx/') ||
+        classDesc.startsWith('Ljava/') ||
+        classDesc.startsWith('Ljavax/') ||
+        classDesc.startsWith('Lio/flutter/') ||
+        classDesc.startsWith('Lokhttp3/') ||
+        classDesc.startsWith('Lokio/') ||
+        classDesc.startsWith('Lretrofit2/') ||
+        classDesc.startsWith('Lcom/bumptech/glide/') ||
+        classDesc.startsWith('Lcom/facebook/') ||
+        classDesc.startsWith('Lorg/apache/') ||
+        classDesc.startsWith('Lorg/intellij/') ||
+        classDesc.startsWith('Lorg/jetbrains/');
+  }
 
   static const List<String> networkApis = [
     'Ljava/net/HttpURLConnection;',
@@ -297,6 +323,9 @@ class MultiSignalDialogEngine {
 
     for (final parser in dexParsers) {
       for (final cls in parser.classes) {
+        // Skip indexing callers in standard libraries to save memory and time
+        if (_isFrameworkOrLibraryClass(cls.className)) continue;
+
         for (final method in cls.allMethods) {
           if (!method.hasCode) continue;
           for (final insn in method.codeItem!.instructions) {
@@ -305,7 +334,6 @@ class MultiSignalDialogEngine {
               callersMap.putIfAbsent(target.fullSignature, () => []).add(
                 _CallerInfo(callerClass: cls, callerMethod: method, dexName: parser.dexName),
               );
-              // Also index by method name & class descriptor
               final shortSig = '${target.classDescriptor}->${target.methodName}';
               callersMap.putIfAbsent(shortSig, () => []).add(
                 _CallerInfo(callerClass: cls, callerMethod: method, dexName: parser.dexName),
@@ -316,9 +344,14 @@ class MultiSignalDialogEngine {
       }
     }
 
-    // 3. Scan all methods in all classes across all DEX files with Register & Object Flow Tracking
+    // 3. Scan application and custom classes across all DEX files with Register & Object Flow Tracking
     for (final parser in dexParsers) {
       for (final cls in parser.classes) {
+        // Skip standard framework and 3rd-party library classes to prevent false positives
+        if (_isFrameworkOrLibraryClass(cls.className)) {
+          continue;
+        }
+
         for (final method in cls.allMethods) {
           if (!method.hasCode) continue;
           final code = method.codeItem!;
@@ -341,7 +374,17 @@ class MultiSignalDialogEngine {
       }
     }
 
-    return candidates;
+    // Deduplicate candidates by class and target byte offset
+    final uniqueCandidates = <CorrelatedDialogCandidate>[];
+    final seenKeys = <String>{};
+    for (final c in candidates) {
+      final key = '${c.declaringClass.className}:${c.declaringMethod.methodRef.methodName}:${c.targetByteOffset}';
+      if (seenKeys.add(key)) {
+        uniqueCandidates.add(c);
+      }
+    }
+
+    return uniqueCandidates;
   }
 
   /// Analyzes a single method by tracking registers, object flow, UI creation, and display calls
@@ -392,8 +435,11 @@ class MultiSignalDialogEngine {
       }
     }
 
-    if (cls.className.toLowerCase().contains('credit') ||
-        cls.className.toLowerCase().contains('dialogbox')) {
+    final lowerCls = cls.className.toLowerCase();
+    if (lowerCls.contains('dialogbox') ||
+        lowerCls.contains('dialog_box') ||
+        lowerCls.contains('creditdialog') ||
+        lowerCls.contains('moddialog')) {
       isCreditDialog = true;
     }
 
@@ -666,10 +712,22 @@ class MultiSignalDialogEngine {
       evidence.add('✓ Injected modder/credit signature detected in bytecode or strings');
     }
 
-    // FALSE POSITIVE FILTER:
-    // A single framework reference by itself is NOT a candidate!
-    // Require at least 2 independent correlated signals (score >= 35) or verified credit dialog
-    if (score < 35 && !isCreditDialog) {
+    // CORE MULTI-SIGNAL DIALOG FILTER:
+    // 1. Must have an actual display operation (show invocation or overriding Dialog.show())!
+    // A dialog that is never shown is not a dialog box on the screen!
+    final hasShowOperation = hasCorrelatedShow || (isDialogSubclass && method.methodRef.methodName == 'show');
+    if (!hasShowOperation) {
+      return null;
+    }
+
+    // 2. Must instantiate a Dialog, be a Dialog subclass, or configure a Dialog object!
+    final hasDialogEntity = hasDialogObjectCreation || hasDialogConstructor || isDialogSubclass || hasCorrelatedContentView;
+    if (!hasDialogEntity) {
+      return null;
+    }
+
+    // 3. Minimum score requirement: must have at least 2 strong correlated signals!
+    if (score < 45) {
       return null;
     }
 

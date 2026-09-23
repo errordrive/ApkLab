@@ -238,6 +238,7 @@ class ApkAnalyzerService {
         dexList: project.dexList,
         smaliFiles: project.smaliFiles,
         packageName: project.apkInfo.packageName,
+        existingFindings: project.dialogFindings,
       );
       return AnalyzedProjectResult(
         project: project,

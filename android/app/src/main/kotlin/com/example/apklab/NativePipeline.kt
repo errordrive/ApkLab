@@ -440,15 +440,36 @@ object NativePipeline {
             listOf(cert)
         ).build()
 
-        val signer = ApkSigner.Builder(listOf(signerConfig))
-            .setInputApk(inputFile)
-            .setOutputApk(outputFile)
-            .setV1SigningEnabled(true)
-            .setV2SigningEnabled(true)
-            .setV3SigningEnabled(true)
-            .build()
+        try {
+            val signer = ApkSigner.Builder(listOf(signerConfig))
+                .setInputApk(inputFile)
+                .setOutputApk(outputFile)
+                .setV1SigningEnabled(true)
+                .setV2SigningEnabled(true)
+                .setV3SigningEnabled(true)
+                .setCreatedBy("ApkLab")
+                .build()
 
-        signer.sign()
+            signer.sign()
+        } catch (e: Exception) {
+            if (outputFile.exists()) {
+                outputFile.delete()
+            }
+            try {
+                val fallbackSigner = ApkSigner.Builder(listOf(signerConfig))
+                    .setInputApk(inputFile)
+                    .setOutputApk(outputFile)
+                    .setV1SigningEnabled(true)
+                    .setV2SigningEnabled(true)
+                    .setV3SigningEnabled(false)
+                    .setCreatedBy("ApkLab")
+                    .build()
+
+                fallbackSigner.sign()
+            } catch (fallbackError: Exception) {
+                throw SignatureException("Failed to sign APK with primary and fallback schemes: ${e.message}; Fallback: ${fallbackError.message}", e)
+            }
+        }
 
         if (!outputFile.exists() || outputFile.length() == 0L) {
             throw IllegalStateException("Signed APK was not generated at: $outputPath")

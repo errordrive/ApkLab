@@ -250,13 +250,16 @@ class ApkBuildPipeline {
     final originalArchive = ZipDecoder().decodeBytes(originalBytes);
     final newArchive = Archive();
     for (final file in originalArchive.files) {
-      // Strip old signature files
-      if (file.name.startsWith('META-INF/') &&
-          (file.name.endsWith('.SF') ||
-              file.name.endsWith('.RSA') ||
-              file.name.endsWith('.DSA') ||
-              file.name.endsWith('.EC') ||
-              file.name == 'META-INF/MANIFEST.MF')) {
+      // Strip old signature files completely (case-insensitive)
+      final upperName = file.name.toUpperCase();
+      if (upperName.startsWith('META-INF/') &&
+          (upperName.endsWith('.SF') ||
+              upperName.endsWith('.RSA') ||
+              upperName.endsWith('.DSA') ||
+              upperName.endsWith('.EC') ||
+              upperName == 'META-INF/MANIFEST.MF' ||
+              upperName.contains('/SIG-') ||
+              upperName.startsWith('META-INF/SIG-'))) {
         continue;
       }
 

@@ -55,19 +55,84 @@ class DialogScannerService {
     'mod by',
     'reverse engineer',
     'reverse-engineered',
-    'credits',
-    'credit',
-    'telegram',
+    'telegram @',
     't.me/',
-    'channel',
-    'cracked',
-    'repacked',
+    'cracked by',
+    'repacked by',
     'hacked by',
-    'modder',
-    'author',
     'vip mod',
     'dialogbox',
+    'dialog_box',
+    'creditdialog',
   ];
+
+  static bool _isFrameworkOrLibraryClass(String className) {
+    final lower = className.toLowerCase();
+    return lower.startsWith('android.') ||
+        lower.startsWith('androidx.') ||
+        lower.startsWith('com.google.') ||
+        lower.startsWith('kotlin.') ||
+        lower.startsWith('kotlinx.') ||
+        lower.startsWith('java.') ||
+        lower.startsWith('javax.') ||
+        lower.startsWith('org.jetbrains.') ||
+        lower.startsWith('org.intellij.') ||
+        lower.startsWith('com.android.');
+  }
+
+  static DialogOnlyReport _buildReportFromFindings(List<DialogFinding> findings, String packageName) {
+    int customBoxes = 0;
+    int standardCount = 0;
+    int materialCount = 0;
+    int fragmentCount = 0;
+    int adNoticeCount = 0;
+    int creditCount = 0;
+
+    for (final f in findings) {
+      final lowerTitle = f.title.toLowerCase();
+      final lowerClass = f.className.toLowerCase();
+      final lowerClassification = f.classification.toLowerCase();
+      final lowerFramework = f.frameworkType.toLowerCase();
+
+      if (f.isInjectedCreditDialog) {
+        creditCount++;
+        if (lowerTitle.contains('dialogbox') || lowerClass.contains('dialogbox') || lowerFramework.contains('dialogbox')) {
+          customBoxes++;
+        }
+      } else if (lowerClassification.contains('bottomsheet') || lowerFramework.contains('bottomsheet')) {
+        materialCount++;
+      } else if (lowerClassification.contains('dialogfragment') || lowerFramework.contains('dialogfragment')) {
+        fragmentCount++;
+      } else if (lowerClassification.contains('ad ') || lowerClassification.contains('interstitial')) {
+        adNoticeCount++;
+      } else {
+        standardCount++;
+      }
+    }
+
+    final summary = 'Multi-Signal Correlated Dialog Scan completed for $packageName.\n'
+        'Total Verified Candidates: ${findings.length}\n'
+        '• Injected Modder Credit Dialogs (Target for Removal): $creditCount\n'
+        '• Custom DialogBoxes ("dialogbox" patterns): $customBoxes\n'
+        '• Standard Authentic Android Dialogs (Preserved): $standardCount\n'
+        '• Material / BottomSheet Dialogs: $materialCount\n'
+        '• DialogFragments: $fragmentCount\n'
+        '• Ad / Notice Dialogs: $adNoticeCount\n\n'
+        'Every candidate has been verified using multi-signal correlation (object creation + UI hierarchy + data flow + display signal).';
+
+    return DialogOnlyReport(
+      totalDialogs: findings.length,
+      customDialogBoxesCount: customBoxes,
+      standardDialogsCount: standardCount,
+      materialDialogsCount: materialCount,
+      fragmentDialogsCount: fragmentCount,
+      adNoticeDialogsCount: adNoticeCount,
+      injectedCreditDialogsCount: creditCount,
+      findings: findings,
+      generatedAt: DateTime.now(),
+      summaryText: summary,
+    );
+  }
 
   /// Scans classes and smali bytecode using multi-signal correlation:
   /// Requires multiple independent signals (object creation + UI content + configuration + show + call graph)
@@ -76,7 +141,12 @@ class DialogScannerService {
     required List<DexInfo> dexList,
     required List<SmaliInfo> smaliFiles,
     required String packageName,
+    List<DialogFinding>? existingFindings,
   }) {
+    if (existingFindings != null && existingFindings.isNotEmpty) {
+      return _buildReportFromFindings(existingFindings, packageName);
+    }
+
     final findings = <DialogFinding>[];
     int customBoxes = 0;
     int standardCount = 0;
@@ -89,6 +159,8 @@ class DialogScannerService {
     // 1. Scan DEX Classes for multi-signal dialog patterns
     for (final dex in dexList) {
       for (final cls in dex.classes) {
+        if (_isFrameworkOrLibraryClass(cls.name)) continue;
+
         final lowerName = cls.name.toLowerCase();
         final lowerSuper = cls.superClass.toLowerCase();
 
@@ -96,9 +168,10 @@ class DialogScannerService {
             lowerName.contains('dialog_box') ||
             cls.name.contains('dialogbox');
 
-        final isSubclass = lowerSuper.contains('dialog') ||
-            lowerSuper.contains('bottomsheet') ||
-            lowerSuper.contains('fragment') ||
+        final isSubclass = lowerSuper.endsWith('dialog') ||
+            lowerSuper.contains('alertdialog') ||
+            lowerSuper.contains('bottomsheetdialog') ||
+            lowerSuper.contains('dialogfragment') ||
             cls.isDialogRelated;
 
         // Check methods for dialog construction & display signals
@@ -106,8 +179,12 @@ class DialogScannerService {
         final hasCreateMethod = cls.methods.any((m) => m.name == 'create' || m.name == 'onCreate');
         final hasSetContentView = cls.methods.any((m) => m.name.contains('setContentView') || m.name.contains('setView'));
 
+        // Must inherit from dialog or be a custom box, and must have show invocation or custom box
+        if (!isSubclass && !isCustomBox) continue;
+        if (!hasShowMethod && !isCustomBox) continue;
+
         // Core Requirement: DO NOT identify from a single API/reference!
-        // Require at least TWO correlated signals (e.g. subclass + show, or custom box, or multiple methods)
+        // Require correlated signals (subclass + show, or custom box, or multiple methods)
         int signalsCount = 0;
         if (isSubclass) signalsCount++;
         if (hasShowMethod) signalsCount++;
@@ -116,9 +193,8 @@ class DialogScannerService {
         if (isCustomBox) signalsCount += 2;
 
         final isCreditDialog = isCustomBox ||
-            lowerName.contains('credit') ||
-            lowerName.contains('mod') ||
-            cls.name.contains('dialogbox');
+            lowerName.contains('creditdialog') ||
+            lowerName.contains('moddialog');
 
         if (signalsCount >= 2 || isCreditDialog) {
           int score = signalsCount * 20;
@@ -142,13 +218,13 @@ class DialogScannerService {
             framework = 'com.google.android.material.bottomsheet.BottomSheetDialog';
             confidenceRating = score >= 60 ? 'HIGH' : 'LIKELY';
             confidence = score >= 60 ? DetectionConfidence.high : DetectionConfidence.medium;
-          } else if (lowerSuper.contains('fragment')) {
+          } else if (lowerSuper.contains('dialogfragment')) {
             fragmentCount++;
             classification = 'DialogFragment Component';
             framework = 'androidx.fragment.app.DialogFragment';
             confidenceRating = score >= 60 ? 'HIGH' : 'LIKELY';
             confidence = score >= 60 ? DetectionConfidence.high : DetectionConfidence.medium;
-          } else if (lowerName.contains('ad') || lowerName.contains('interstitial')) {
+          } else if (lowerName.contains('ad') && (lowerName.contains('dialog') || lowerName.contains('interstitial'))) {
             adNoticeCount++;
             classification = 'Ad / Nag Dialog Pattern';
             framework = 'android.app.AlertDialog';
@@ -249,6 +325,8 @@ class DialogScannerService {
 
     // 2. Scan Smali bytecode for correlated multi-signal dialog flows
     for (final smali in smaliFiles) {
+      if (_isFrameworkOrLibraryClass(smali.className)) continue;
+
       final code = smali.smaliCode;
       final lowerCode = code.toLowerCase();
       final hasCreditKeywords = creditKeywords.any((kw) => lowerCode.contains(kw));
@@ -264,6 +342,10 @@ class DialogScannerService {
           code.contains('ConstraintLayout');
       final hasView = code.contains('TextView') || code.contains('Button');
 
+      // Core Requirement: A dialog must actually show, and must have creation or content
+      if (!hasShow) continue;
+      if (!hasNewInstance && !hasContentView && !hasCreditKeywords) continue;
+
       // Core Requirement: Require multiple independent signals!
       int smaliScore = 0;
       if (hasNewInstance) smaliScore += 25;
@@ -272,7 +354,7 @@ class DialogScannerService {
       if (hasViewGroup && hasView) smaliScore += 20;
       if (hasCreditKeywords) smaliScore += 30;
 
-      if ((smaliScore >= 50 || hasCreditKeywords) &&
+      if (smaliScore >= 50 &&
           !findings.any((f) => f.className == smali.className)) {
         final isCredit = hasCreditKeywords || lowerCode.contains('dialogbox');
         if (isCredit) {

@@ -40,6 +40,7 @@ class AppState extends ChangeNotifier {
             dexList: _currentProject.dexList,
             smaliFiles: _currentProject.smaliFiles,
             packageName: _currentProject.apkInfo.packageName,
+            existingFindings: _currentProject.dialogFindings.isNotEmpty ? _currentProject.dialogFindings : null,
           );
           notifyListeners();
         } catch (e, st) {
@@ -125,6 +126,7 @@ class AppState extends ChangeNotifier {
       dexList: _currentProject.dexList,
       smaliFiles: _currentProject.smaliFiles,
       packageName: _currentProject.apkInfo.packageName,
+      existingFindings: _currentProject.dialogFindings.isNotEmpty ? _currentProject.dialogFindings : null,
     );
     notifyListeners();
   }
@@ -140,6 +142,7 @@ class AppState extends ChangeNotifier {
       dexList: _currentProject.dexList,
       smaliFiles: _currentProject.smaliFiles,
       packageName: _currentProject.apkInfo.packageName,
+      existingFindings: _currentProject.dialogFindings.isNotEmpty ? _currentProject.dialogFindings : null,
     );
     _dialogReport = report;
 
