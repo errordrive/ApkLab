@@ -17,6 +17,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.KeyStore
 import java.security.PrivateKey
+import java.security.SignatureException
 import java.security.cert.X509Certificate
 import java.util.zip.CRC32
 import java.util.zip.ZipEntry
@@ -467,7 +468,7 @@ object NativePipeline {
 
                 fallbackSigner.sign()
             } catch (fallbackError: Exception) {
-                throw SignatureException("Failed to sign APK with primary and fallback schemes: ${e.message}; Fallback: ${fallbackError.message}", e)
+                throw IllegalStateException("Failed to sign APK with primary and fallback schemes: ${e.message}; Fallback: ${fallbackError.message}", e)
             }
         }
 
