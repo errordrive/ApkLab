@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Patched APKs and reports under /storage/emulated/0/ApkLab/ -->
+    <external-path name="apklab" path="ApkLab/" />
+    <!-- Imported APKs staged in app cache -->
+    <cache-path name="shared" path="." />
+</paths>
