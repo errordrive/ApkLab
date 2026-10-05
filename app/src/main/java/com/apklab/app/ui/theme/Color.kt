@@ -1,0 +1,42 @@
+package com.apklab.app.ui.theme
+
+import androidx.compose.ui.graphics.Color
+
+// Exam Blue — light palette
+val PaperLight = Color(0xFFEDF1F9)
+val CardLight = Color(0xFFFFFFFF)
+val InkLight = Color(0xFF0F1B2D)
+val InkSoftLight = Color(0xFF33415C)
+val MutedLight = Color(0xFF64748B)
+val FaintLight = Color(0xFF94A3B8)
+val LineLight = Color(0xFFE2E8F2)
+val PrimaryLight = Color(0xFF2563EB)
+val PrimaryDarkLight = Color(0xFF1D4ED8)
+val PrimarySoftLight = Color(0xFFE4EBFD)
+val SuccessLight = Color(0xFF16A34A)
+val SuccessSoftLight = Color(0xFFE5F6EB)
+val DangerLight = Color(0xFFDC2626)
+val DangerSoftLight = Color(0xFFFDECEC)
+val AmberLight = Color(0xFFD97706)
+val AmberSoftLight = Color(0xFFFDF0DC)
+val PurpleLight = Color(0xFF7C3AED)
+val PurpleSoftLight = Color(0xFFF0E9FD)
+
+// Exam Blue — dark palette
+val PaperDark = Color(0xFF0A1120)
+val CardDark = Color(0xFF131D33)
+val InkDark = Color(0xFFE9EFFA)
+val InkSoftDark = Color(0xFFC3D0E6)
+val MutedDark = Color(0xFF8B9BB8)
+val FaintDark = Color(0xFF5B6B89)
+val LineDark = Color(0xFF22304D)
+val PrimaryDark = Color(0xFF4D8DFF)
+val PrimarySoftDark = Color(0xFF16294D)
+val SuccessDark = Color(0xFF2FCE67)
+val SuccessSoftDark = Color(0xFF123626)
+val DangerDark = Color(0xFFF0564F)
+val DangerSoftDark = Color(0xFF3D1D1D)
+val AmberDark = Color(0xFFF5A623)
+val AmberSoftDark = Color(0xFF3A2A12)
+val PurpleDark = Color(0xFFA582FA)
+val PurpleSoftDark = Color(0xFF2A2148)
