@@ -1,0 +1,170 @@
+package com.apklab.engine
+
+import org.jf.dexlib2.Opcode
+import org.jf.dexlib2.iface.DexFile
+import org.jf.dexlib2.iface.Method
+import org.jf.dexlib2.iface.instruction.ReferenceInstruction
+import org.jf.dexlib2.iface.reference.MethodReference
+import org.jf.dexlib2.iface.reference.StringReference
+import org.jf.dexlib2.iface.reference.TypeReference
+
+/**
+ * Detects injected remote-controlled dialog classes.
+ *
+ * A class is flagged ONLY when BOTH hold in the same class:
+ *  - Tier 1: references android.app.Dialog (type or method refs)
+ *  - Tier 2: remote-fetch signals (HttpURLConnection/OkHttp types,
+ *    JSONObject.optBoolean/optString, pastebin/isVisible/updateUrl strings)
+ *
+ * Framework packages are never flagged (allowlist).
+ */
+object Detector {
+
+    private val ALLOWLIST_PREFIXES = listOf(
+        "Landroid/", "Landroidx/",
+        "Lcom/google/android/", "Lcom/google/",
+        "Lkotlin/", "Lkotlinx/",
+        "Ljava/", "Ljavax/", "Ldalvik/",
+        "Lorg/xmlpull/", "Lcom/android/"
+    )
+
+    private const val DIALOG_TYPE = "Landroid/app/Dialog;"
+
+    private val TIER1_DIALOG_METHODS = setOf(
+        "show", "dismiss", "setContentView", "setCancelable",
+        "setCanceledOnTouchOutside", "requestWindowFeature",
+        "getWindow", "isShowing"
+    )
+
+    private val TIER2_TYPES = setOf(
+        "Ljava/net/HttpURLConnection;",
+        "Lokhttp3/OkHttpClient;",
+        "Lokhttp3/Request;"
+    )
+
+    private val TIER2_METHOD_NAMES = setOf("optBoolean", "optString")
+
+    private val TIER2_STRING_SUBS = listOf("pastebin", "isvisible", "updateurl")
+
+    fun isAllowlisted(type: String): Boolean =
+        ALLOWLIST_PREFIXES.any { type.startsWith(it) }
+
+    fun methodDescriptor(method: Method): String {
+        val params = method.parameters.joinToString("") { it.type }
+        return "($params)${method.returnType}"
+    }
+
+    private class ClassSignals(val dexName: String) {
+        var tier1: Boolean = false
+        var tier2: Boolean = false
+        val methodsToGut: MutableList<MethodTarget> = mutableListOf()
+    }
+
+    /** Single-dex scan (used by tests). */
+    fun scanDex(dexFile: DexFile, dexName: String): List<Detection> =
+        scanMultiDex(mapOf(dexName to dexFile))
+
+    /**
+     * Multi-dex scan: candidates are collected across ALL dex files first,
+     * then hook call sites are searched across ALL dex files. This catches
+     * hooks that live in a different classesN.dex than the injected class.
+     */
+    fun scanMultiDex(dexFiles: Map<String, DexFile>): List<Detection> {
+        val signals = mutableMapOf<String, ClassSignals>()
+
+        // Pass 1: per-class tier signals + gut targets, across all dexes.
+        for ((dexName, dexFile) in dexFiles) {
+            for (classDef in dexFile.classes) {
+                val type = classDef.type
+                if (isAllowlisted(type)) continue
+                val sig = signals.getOrPut(type) { ClassSignals(dexName) }
+                for (method in classDef.methods) {
+                    val impl = method.implementation ?: continue
+                    var dialogShow = false
+                    for (insn in impl.instructions) {
+                        if (insn !is ReferenceInstruction) continue
+                        when (val ref = insn.reference) {
+                            is TypeReference -> {
+                                if (ref.type == DIALOG_TYPE) {
+                                    sig.tier1 = true
+                                    if (insn.opcode == Opcode.NEW_INSTANCE) dialogShow = true
+                                }
+                                if (ref.type in TIER2_TYPES) sig.tier2 = true
+                            }
+                            is MethodReference -> {
+                                if (ref.definingClass == DIALOG_TYPE && ref.name in TIER1_DIALOG_METHODS) {
+                                    sig.tier1 = true
+                                    if (ref.name == "show") dialogShow = true
+                                }
+                                if (ref.name in TIER2_METHOD_NAMES) sig.tier2 = true
+                            }
+                            is StringReference -> {
+                                val s = ref.string.lowercase()
+                                if (TIER2_STRING_SUBS.any { s.contains(it) }) sig.tier2 = true
+                            }
+                        }
+                    }
+                    if (dialogShow) {
+                        val desc = methodDescriptor(method)
+                        // Only void methods are safe to gut.
+                        if (desc.endsWith(")V")) {
+                            sig.methodsToGut.add(MethodTarget(type, method.name, desc))
+                        }
+                    }
+                }
+            }
+        }
+
+        val candidates = signals.filter { (_, s) ->
+            s.tier1 && s.tier2 && s.methodsToGut.isNotEmpty()
+        }
+        if (candidates.isEmpty()) return emptyList()
+
+        // Pass 2: hook sites — void invokes to gutted methods, from any
+        // non-allowlisted class in ANY dex file.
+        val gutByClassName: Map<Pair<String, String>, MethodTarget> =
+            candidates.flatMap { (cls, s) ->
+                s.methodsToGut.map { (cls to it.name) to it }
+            }.toMap()
+
+        val hookSites = mutableListOf<HookSite>()
+        for ((_, dexFile) in dexFiles) {
+            for (classDef in dexFile.classes) {
+                val callerType = classDef.type
+                if (isAllowlisted(callerType)) continue
+                for (method in classDef.methods) {
+                    val impl = method.implementation ?: continue
+                    val insns = impl.instructions.toList()
+                    for (i in insns.indices) {
+                        val insn = insns[i]
+                        if (insn !is ReferenceInstruction) continue
+                        val ref = insn.reference
+                        if (ref !is MethodReference) continue
+                        if (ref.returnType != "V") continue
+                        val target = gutByClassName[ref.definingClass to ref.name] ?: continue
+                        val next = insns.getOrNull(i + 1)
+                        if (next != null && next.opcode.name.startsWith("MOVE_RESULT")) continue
+                        hookSites.add(HookSite(callerType, method.name, target))
+                    }
+                }
+            }
+        }
+
+        return candidates.map { (cls, s) ->
+            val hooks = hookSites.filter { it.target.declaringClass == cls }
+            val confidence = when {
+                hooks.isNotEmpty() -> 0.95
+                s.methodsToGut.size >= 2 -> 0.9
+                else -> 0.85
+            }
+            Detection(
+                classType = cls,
+                badges = setOf(Badge.DIALOG, Badge.REMOTE),
+                methodsToGut = s.methodsToGut.toList(),
+                hookSites = hooks,
+                confidence = confidence,
+                sourceDex = s.dexName
+            )
+        }
+    }
+}
