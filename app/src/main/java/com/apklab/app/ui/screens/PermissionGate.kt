@@ -1,5 +1,6 @@
 package com.apklab.app.ui.screens
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -53,11 +54,25 @@ fun PermissionGateScreen(vm: AppViewModel, permissionDenied: Boolean) {
 
     fun request() {
         if (Build.VERSION.SDK_INT >= 30) {
-            val intent = Intent(
-                Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION,
-                Uri.parse("package:${context.packageName}"),
-            )
-            settingsLauncher.launch(intent)
+            // Some OEM ROMs don't resolve the package: URI variant -> ActivityNotFoundException.
+            // Walk a fallback chain so the button never crashes.
+            val pkgUri = Uri.parse("package:${context.packageName}")
+            val intents = buildList {
+                if (Build.VERSION.SDK_INT >= 31) {
+                    add(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, pkgUri))
+                }
+                add(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION, pkgUri))
+                add(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                add(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkgUri))
+            }
+            for (intent in intents) {
+                try {
+                    settingsLauncher.launch(intent)
+                    return
+                } catch (_: ActivityNotFoundException) {
+                    // try next fallback
+                }
+            }
         } else {
             legacyLauncher.launch(
                 arrayOf(
