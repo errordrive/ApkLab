@@ -64,8 +64,7 @@ class DetectorTest {
     }
 
     @Test
-    fun `hook caller inside known ad SDK is ignored`() {
-        val evil = DexFixtures.TestClass("Lcom/evil/Update;", listOf(DexFixtures.evilShowMethod()))
+    fun `hook caller inside known ad SDK is ignored`() {        val evil = DexFixtures.TestClass("Lcom/evil/Update;", listOf(DexFixtures.evilShowMethod()))
         val adCaller = DexFixtures.TestClass(
             "Lcom/mbridge/msdk/splash/c/c;", listOf(
                 DexFixtures.TestMethod(
@@ -231,5 +230,84 @@ class DetectorTest {
         )
         val (_, dets) = scanOf(odd)
         assertTrue("non-void method must not be a gut target: $dets", dets.isEmpty())
+    }
+
+    // ---------- Tier B: startup-hooked offline dialog ----------
+
+    @Test
+    fun `offline dialog helper hooked from onCreate is flagged STARTUP`() {
+        val helper = DexFixtures.TestClass(
+            "Lcom/app/WelcomeDialog;", listOf(DexFixtures.offlineDialogMethod())
+        )
+        val main = DexFixtures.TestClass(
+            "Lcom/app/MainActivity;",
+            listOf(DexFixtures.mainOnCreateCalling("Lcom/app/WelcomeDialog;", "showWelcome"))
+        )
+        val (_, dets) = scanOf(helper, main)
+        assertEquals(1, dets.size)
+        val d = dets[0]
+        assertEquals("Lcom/app/WelcomeDialog;", d.classType)
+        assertTrue(d.badges.containsAll(setOf(Badge.DIALOG, Badge.STARTUP)))
+        assertTrue("Tier B must not gut: $d", d.methodsToGut.isEmpty())
+        assertEquals(1, d.scopedNops.size)
+        val nop = d.scopedNops[0]
+        assertEquals("Lcom/app/MainActivity;", nop.callerClass)
+        assertEquals("onCreate", nop.callerMethod)
+        assertEquals("showWelcome", nop.targetMethod)
+    }
+
+    @Test
+    fun `offline dialog helper without startup hook is not flagged`() {
+        val helper = DexFixtures.TestClass(
+            "Lcom/app/WelcomeDialog;", listOf(DexFixtures.offlineDialogMethod())
+        )
+        // No caller at all -> nothing shown at startup -> no detection.
+        val (_, dets) = scanOf(helper)
+        assertTrue("unhooked helper must not be flagged: $dets", dets.isEmpty())
+    }
+
+    @Test
+    fun `offline dialog called from click handler is not flagged`() {
+        val helper = DexFixtures.TestClass(
+            "Lcom/app/WelcomeDialog;", listOf(DexFixtures.offlineDialogMethod())
+        )
+        val main = DexFixtures.TestClass(
+            "Lcom/app/MainActivity;", listOf(
+                DexFixtures.TestMethod(
+                    "onButtonClick",
+                    params = emptyList(),
+                    access = 0x1,
+                    impl = DexFixtures.implOf(
+                        DexFixtures.invokeStatic(
+                            "Lcom/app/WelcomeDialog;", "showWelcome", "V",
+                            listOf("Landroid/app/Activity;")
+                        ),
+                        DexFixtures.returnVoid()
+                    )
+                )
+            )
+        )
+        val (_, dets) = scanOf(helper, main)
+        assertTrue("non-startup hook must not be flagged: $dets", dets.isEmpty())
+    }
+
+    // ---------- Tier C: inline dialog in onCreate ----------
+
+    @Test
+    fun `inline dialog in onCreate is flagged STARTUP`() {
+        val main = DexFixtures.TestClass(
+            "Lcom/app/MainActivity;", listOf(DexFixtures.mainOnCreateInlineDialog())
+        )
+        val (_, dets) = scanOf(main)
+        assertEquals(1, dets.size)
+        val d = dets[0]
+        assertEquals("Lcom/app/MainActivity;", d.classType)
+        assertTrue(d.badges.containsAll(setOf(Badge.DIALOG, Badge.STARTUP)))
+        assertTrue("Tier C must not gut onCreate: $d", d.methodsToGut.isEmpty())
+        assertEquals(1, d.scopedNops.size)
+        val nop = d.scopedNops[0]
+        assertEquals("onCreate", nop.callerMethod)
+        assertEquals("Landroid/app/Dialog;", nop.targetClass)
+        assertEquals("show", nop.targetMethod)
     }
 }
