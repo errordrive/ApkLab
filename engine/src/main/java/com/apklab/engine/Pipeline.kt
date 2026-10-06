@@ -24,23 +24,40 @@ object Engine {
         }
         val tmp = Files.createTempDirectory("apklab-scan").toFile()
         try {
-            // Load all dex files first, then scan jointly so hooks in a
-            // different classesN.dex than the injected class are still found.
-            val dexFiles = mutableMapOf<String, org.jf.dexlib2.iface.DexFile>()
+            // Pass 1: dialog detection, ONE dex at a time. Big APKs (100MB+)
+            // would otherwise hold every dex file in memory simultaneously.
+            val signals = mutableMapOf<String, Detector.ClassSignals>()
             for (dexName in dexNames) {
-                log("Loading $dexName...")
+                log("Scanning $dexName...")
                 val dexFile = File(tmp, dexName)
                 ApkIO.extractDex(apkFile, dexName, dexFile)
-                dexFiles[dexName] =
-                    DexFileFactory.loadDexFile(dexFile, Opcodes.getDefault())
+                val dex = DexFileFactory.loadDexFile(dexFile, Opcodes.getDefault())
+                Detector.collectSignals(dex, dexName, signals)
+                dexFile.delete() // drop bytes; let GC reclaim the parsed dex before the next one
             }
-            log("Scanning ${dexFiles.size} dex file(s)...")
-            val detections = Detector.scanMultiDex(dexFiles)
+            val candidates = Detector.confirmCandidates(signals)
+            if (candidates.isEmpty()) {
+                log("No suspicious dialog code found")
+                return ScanResult(info, emptyList())
+            }
+            // Pass 2: hook sites, ONE dex at a time (hooks may live in a
+            // different classesN.dex than the injected class).
+            val gutByClassName = Detector.gutIndex(candidates)
+            val hookSites = mutableListOf<HookSite>()
+            for (dexName in dexNames) {
+                log("Searching hooks in $dexName...")
+                val dexFile = File(tmp, dexName)
+                ApkIO.extractDex(apkFile, dexName, dexFile)
+                val dex = DexFileFactory.loadDexFile(dexFile, Opcodes.getDefault())
+                hookSites += Detector.findHookSites(dex, gutByClassName)
+                dexFile.delete()
+            }
+            val detections = Detector.buildDetections(candidates, hookSites)
+            log("Scanning ${dexNames.size} dex file(s)... done")
             for (d in detections) {
                 log("Suspicious: ${d.classType} [${d.badges.joinToString(",")}] " +
                     "(${d.methodsToGut.size} method(s), ${d.hookSites.size} hook(s))")
             }
-            if (detections.isEmpty()) log("No suspicious dialog code found")
             return ScanResult(info, detections)
         } finally {
             tmp.deleteRecursively()
@@ -91,6 +108,13 @@ object Engine {
                 log("Patching $dexName...")
                 val dex = DexFileFactory.loadDexFile(dexFile, Opcodes.getDefault())
                 val patched = Patcher.patchDex(dex, gutTargets, allHookKeys)
+                if (patched === dex) {
+                    // Nothing to change here — skip the expensive DexPool
+                    // rewrite entirely. This is the big win on 100MB+ APKs
+                    // where only 1-2 dex files contain the injected code.
+                    log("$dexName: no targets, skipping rewrite")
+                    continue
+                }
                 val tmpDex = File(work, "$dexName.patched")
                 Patcher.writeDex(patched, tmpDex)
                 // Sanity: the rewritten DEX must still parse.
