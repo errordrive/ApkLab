@@ -103,7 +103,13 @@ object Detector {
     private val INLINE_SHOW_TARGETS = setOf(
         "Landroid/app/Dialog;" to "show",
         "Landroid/app/AlertDialog\$Builder;" to "show",
-        "Landroidx/appcompat/app/AlertDialog\$Builder;" to "show"
+        "Landroidx/appcompat/app/AlertDialog\$Builder;" to "show",
+        // Legacy managed dialogs: Activity.showDialog(id)
+        "Landroid/app/Activity;" to "showDialog",
+        "Landroidx/fragment/app/FragmentActivity;" to "showDialog",
+        // DialogFragment.show(manager, tag)
+        "Landroid/app/DialogFragment;" to "show",
+        "Landroidx/fragment/app/DialogFragment;" to "show"
     )
 
     fun isAllowlisted(type: String): Boolean =
