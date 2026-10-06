@@ -39,8 +39,7 @@ object Detector {
         "Lcom/mbridge/",                 // Mbridge (Mintegral) ads
         "Lcom/google/android/gms/ads/",  // AdMob / Google Mobile Ads
         "Lcom/google/ads/",
-        "Lcom/facebook/ads/",            // Meta Audience Network
-        "Lcom/facebook/appevents/",
+        "Lcom/facebook/",                // Full Facebook SDK (login, sharing, ads)
         "Lcom/unity3d/ads/",             // Unity Ads
         "Lcom/applovin/",               // AppLovin MAX
         "Lcom/chartboost/",
