@@ -9,7 +9,7 @@ import java.security.PrivateKey
 import java.security.cert.Certificate
 import java.security.cert.X509Certificate
 
-/** Signs an (aligned) APK with v1+v2 schemes using a JKS keystore, then verifies. */
+/** Signs an (aligned) APK with v1+v2 schemes using a PKCS12 keystore, then verifies. */
 object Signer {
 
     fun sign(
@@ -20,7 +20,9 @@ object Signer {
         alias: String,
         keyPass: String
     ) {
-        val ks = KeyStore.getInstance(KeyStore.getDefaultType())
+        // NOTE: must be "PKCS12" explicitly. KeyStore.getDefaultType() is "BKS"
+        // on Android and fails with "Wrong version of key store" on our keystore.
+        val ks = KeyStore.getInstance("PKCS12")
         FileInputStream(keystoreFile).use { ks.load(it, storePass.toCharArray()) }
         val key = ks.getKey(alias, keyPass.toCharArray()) as PrivateKey
         val chain: List<X509Certificate> = ks.getCertificateChain(alias).map { it as X509Certificate }
