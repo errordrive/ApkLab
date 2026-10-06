@@ -36,28 +36,36 @@ object Engine {
                 dexFile.delete() // drop bytes; let GC reclaim the parsed dex before the next one
             }
             val candidates = Detector.confirmCandidates(signals)
-            if (candidates.isEmpty()) {
-                log("No suspicious dialog code found")
-                return ScanResult(info, emptyList())
-            }
-            // Pass 2: hook sites, ONE dex at a time (hooks may live in a
-            // different classesN.dex than the injected class).
+            // Tier B targets (offline dialog helpers) — excluded if already Tier A.
+            val targetsB = Detector.startupTargets(signals, candidates.keys.toSet())
+            // Pass 2: hook sites + startup nops, ONE dex at a time (hooks may
+            // live in a different classesN.dex than the injected class).
             val gutByClassName = Detector.gutIndex(candidates)
             val hookSites = mutableListOf<HookSite>()
+            val startupNops = mutableListOf<ScopedNop>()
+            val inlineNops = mutableListOf<ScopedNop>()
             for (dexName in dexNames) {
                 log("Searching hooks in $dexName...")
                 val dexFile = File(tmp, dexName)
                 ApkIO.extractDex(apkFile, dexName, dexFile)
                 val dex = DexFileFactory.loadDexFile(dexFile, Opcodes.getDefault())
-                hookSites += Detector.findHookSites(dex, gutByClassName)
+                if (candidates.isNotEmpty()) {
+                    hookSites += Detector.findHookSites(dex, gutByClassName)
+                }
+                if (targetsB.isNotEmpty()) {
+                    startupNops += Detector.findStartupNops(dex, targetsB)
+                }
+                inlineNops += Detector.findInlineNops(dex)
                 dexFile.delete()
             }
-            val detections = Detector.buildDetections(candidates, hookSites)
+            val detections = Detector.buildDetections(candidates, hookSites) +
+                Detector.buildStartupDetections(signals, startupNops, inlineNops)
             log("Scanning ${dexNames.size} dex file(s)... done")
             for (d in detections) {
                 log("Suspicious: ${d.classType} [${d.badges.joinToString(",")}] " +
-                    "(${d.methodsToGut.size} method(s), ${d.hookSites.size} hook(s))")
+                    "(${d.methodsToGut.size} method(s), ${d.totalNops} nop(s))")
             }
+            if (detections.isEmpty()) log("No suspicious dialog code found")
             return ScanResult(info, detections)
         } finally {
             tmp.deleteRecursively()
@@ -94,12 +102,16 @@ object Engine {
             val allHookKeys: Set<Pair<String, String>> = detections
                 .flatMap { d -> d.hookSites.map { it.target.declaringClass to it.target.name } }
                 .toSet()
+            // Tier B/C: scoped startup nops (applied per caller method, every dex).
+            val allScopedNops: Set<ScopedNop> = detections
+                .flatMap { d -> d.scopedNops }
+                .toSet()
 
             var totalGutted = 0
             var totalNopped = 0
             for (dexName in ApkIO.listDexNames(apkFile)) {
                 val gutTargets = gutByDex[dexName] ?: emptyList()
-                if (gutTargets.isEmpty() && allHookKeys.isEmpty()) continue
+                if (gutTargets.isEmpty() && allHookKeys.isEmpty() && allScopedNops.isEmpty()) continue
                 val dexFile = File(apkDir, dexName)
                 if (!dexFile.exists()) {
                     log("WARNING: $dexName not found in APK, skipping")
@@ -107,7 +119,7 @@ object Engine {
                 }
                 log("Patching $dexName...")
                 val dex = DexFileFactory.loadDexFile(dexFile, Opcodes.getDefault())
-                val patched = Patcher.patchDex(dex, gutTargets, allHookKeys)
+                val patched = Patcher.patchDex(dex, gutTargets, allHookKeys, allScopedNops)
                 if (patched === dex) {
                     // Nothing to change here — skip the expensive DexPool
                     // rewrite entirely. This is the big win on 100MB+ APKs
@@ -122,8 +134,8 @@ object Engine {
                 tmpDex.copyTo(dexFile, overwrite = true)
                 totalGutted += gutTargets.size
             }
-            totalNopped = detections.sumOf { it.hookSites.size }
-            log("Gutted $totalGutted method(s), nopped $totalNopped hook call(s)")
+            totalNopped = detections.sumOf { it.totalNops }
+            log("Gutted $totalGutted method(s), nopped $totalNopped call(s)")
 
             log("Repacking + aligning...")
             val aligned = File(work, "aligned.apk")
