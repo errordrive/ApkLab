@@ -116,18 +116,24 @@ fun ReportScreen(vm: AppViewModel, state: UiState) {
                         }
                         if (Badge.REMOTE in d.badges) {
                             StatusPill("REMOTE", c.amberSoft, c.amber)
+                            Spacer(Modifier.width(7.dp))
+                        }
+                        if (Badge.STARTUP in d.badges) {
+                            StatusPill("STARTUP", c.purpleSoft, c.purple)
                         }
                     }
-                    Text("Methods to gut", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = c.inkSoft, modifier = Modifier.padding(top = 8.dp, bottom = 6.dp))
-                    d.methodsToGut.forEach { m ->
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 6.dp)) {
-                            Box(Modifier.size(8.dp).clip(RoundedCornerShape(999.dp)).background(c.danger))
-                            Spacer(Modifier.width(10.dp))
-                            CodeLine("${m.name}(${m.descriptor.substringAfter('(')}")
+                    if (d.methodsToGut.isNotEmpty()) {
+                        Text("Methods to gut", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = c.inkSoft, modifier = Modifier.padding(top = 8.dp, bottom = 6.dp))
+                        d.methodsToGut.forEach { m ->
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 6.dp)) {
+                                Box(Modifier.size(8.dp).clip(RoundedCornerShape(999.dp)).background(c.danger))
+                                Spacer(Modifier.width(10.dp))
+                                CodeLine("${m.name}(${m.descriptor.substringAfter('(')}")
+                            }
                         }
                     }
                     Text("Hook calls to nop", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = c.inkSoft, modifier = Modifier.padding(top = 6.dp, bottom = 6.dp))
-                    if (d.hookSites.isEmpty()) {
+                    if (d.hookSites.isEmpty() && d.scopedNops.isEmpty()) {
                         Text("None", fontSize = 12.sp, color = c.muted)
                     } else {
                         d.hookSites.forEach { h ->
@@ -135,6 +141,13 @@ fun ReportScreen(vm: AppViewModel, state: UiState) {
                                 Box(Modifier.size(8.dp).clip(RoundedCornerShape(999.dp)).background(c.amber))
                                 Spacer(Modifier.width(10.dp))
                                 CodeLine("${prettyClass(h.callerClass).substringAfterLast('.')}.${h.callerMethod} → ${h.target.name}()")
+                            }
+                        }
+                        d.scopedNops.forEach { s ->
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 6.dp)) {
+                                Box(Modifier.size(8.dp).clip(RoundedCornerShape(999.dp)).background(c.purple))
+                                Spacer(Modifier.width(10.dp))
+                                CodeLine("${prettyClass(s.callerClass).substringAfterLast('.')}.${s.callerMethod} → ${s.targetMethod}() [startup]")
                             }
                         }
                     }
