@@ -52,6 +52,42 @@ class DetectorTest {
     }
 
     @Test
+    fun `known ad SDK is never flagged even with dialog plus network`() {
+        // Mbridge-style: same Tier1+Tier2 signals as an injected dialog,
+        // but inside a known ad SDK namespace -> must be skipped.
+        val adSdk = DexFixtures.TestClass(
+            "Lcom/mbridge/msdk/foundation/d/a/a;",
+            listOf(DexFixtures.evilShowMethod().copy(name = "a"))
+        )
+        val (_, dets) = scanOf(adSdk)
+        assertEquals(0, dets.size)
+    }
+
+    @Test
+    fun `hook caller inside known ad SDK is ignored`() {
+        val evil = DexFixtures.TestClass("Lcom/evil/Update;", listOf(DexFixtures.evilShowMethod()))
+        val adCaller = DexFixtures.TestClass(
+            "Lcom/mbridge/msdk/splash/c/c;", listOf(
+                DexFixtures.TestMethod(
+                    "viewClicked",
+                    params = emptyList(),
+                    access = 0x1,
+                    impl = DexFixtures.implOf(
+                        DexFixtures.invokeStatic(
+                            "Lcom/evil/Update;", "checkAndShow", "V",
+                            listOf("Landroid/app/Activity;")
+                        ),
+                        DexFixtures.returnVoid()
+                    )
+                )
+            )
+        )
+        val (_, dets) = scanOf(evil, adCaller)
+        assertEquals(1, dets.size)
+        assertEquals(0, dets[0].hookSites.size)
+    }
+
+    @Test
     fun `clean AlertDialog usage is not flagged`() {
         val clean = DexFixtures.TestClass(
             "Lcom/app/Ui;", listOf(
