@@ -151,4 +151,58 @@ class PatcherTest {
         val m = reloaded.classes.first().methods.first()
         assertEquals(Opcode.RETURN_VOID, m.implementation!!.instructions.toList()[0].opcode)
     }
+
+    @Test
+    fun `scoped nop silences only the startup call, helper method intact`() {
+        val helper = DexFixtures.TestClass(
+            "Lcom/app/WelcomeDialog;", listOf(DexFixtures.offlineDialogMethod())
+        )
+        val main = DexFixtures.TestClass(
+            "Lcom/app/MainActivity;", listOf(
+                DexFixtures.mainOnCreateCalling("Lcom/app/WelcomeDialog;", "showWelcome"),
+                // same helper called from a click handler - must stay working
+                DexFixtures.TestMethod(
+                    "onButtonClick",
+                    params = emptyList(),
+                    access = 0x1,
+                    impl = DexFixtures.implOf(
+                        DexFixtures.invokeStatic(
+                            "Lcom/app/WelcomeDialog;", "showWelcome", "V",
+                            listOf("Landroid/app/Activity;")
+                        ),
+                        DexFixtures.returnVoid()
+                    )
+                )
+            )
+        )
+        val builder = DexFixtures.buildDex(listOf(helper, main))
+        val tmp = File.createTempFile("prepatch-b", ".dex")
+        tmp.deleteOnExit()
+        Patcher.writeDex(builder, tmp)
+        val dex = DexFileFactory.loadDexFile(tmp, Opcodes.getDefault())
+        val dets = Detector.scanDex(dex, "classes.dex")
+        assertEquals(1, dets.size)
+        assertTrue(dets[0].badges.contains(Badge.STARTUP))
+
+        val patched = Patcher.patchDex(dex, dets)
+        val out = File.createTempFile("patched-b", ".dex")
+        out.deleteOnExit()
+        Patcher.writeDex(patched, out)
+        val reloaded = DexFileFactory.loadDexFile(out, Opcodes.getDefault())
+
+        // Helper method body untouched (NOT gutted).
+        val helperCls = reloaded.classes.first { it.type == "Lcom/app/WelcomeDialog;" }
+        val showWelcome = helperCls.methods.first { it.name == "showWelcome" }
+        assertTrue(showWelcome.implementation!!.instructions.count() > 1)
+
+        // onCreate hook nopped...
+        val mainCls = reloaded.classes.first { it.type == "Lcom/app/MainActivity;" }
+        val onCreate = mainCls.methods.first { it.name == "onCreate" }
+        assertEquals(Opcode.NOP, onCreate.implementation!!.instructions.toList()[0].opcode)
+
+        // ...but the click-handler call still works.
+        val onClick = mainCls.methods.first { it.name == "onButtonClick" }
+        val clickInsns = onClick.implementation!!.instructions.toList()
+        assertEquals(Opcode.INVOKE_STATIC, clickInsns[0].opcode)
+    }
 }
