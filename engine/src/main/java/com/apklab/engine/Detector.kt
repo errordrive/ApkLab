@@ -90,6 +90,22 @@ object Detector {
 
     private val TIER2_STRING_SUBS = listOf("pastebin", "isvisible", "updateurl")
 
+    /**
+     * Lifecycle entry points where a "startup dialog" hook lives.
+     * A custom dialog invoked from one of these = shown at app start.
+     */
+    private val LIFECYCLE_METHODS = setOf("onCreate", "onStart", "onResume")
+
+    /**
+     * Direct "show the dialog now" targets for inline startup dialogs
+     * (dialog code written directly inside onCreate, no helper method).
+     */
+    private val INLINE_SHOW_TARGETS = setOf(
+        "Landroid/app/Dialog;" to "show",
+        "Landroid/app/AlertDialog\$Builder;" to "show",
+        "Landroidx/appcompat/app/AlertDialog\$Builder;" to "show"
+    )
+
     fun isAllowlisted(type: String): Boolean =
         ALLOWLIST_PREFIXES.any { type.startsWith(it) }
 
@@ -110,7 +126,13 @@ object Detector {
         var tier1: Boolean = false
         var tier2: Boolean = false
         val methodsToGut: MutableList<MethodTarget> = mutableListOf()
+        /** Names of lifecycle methods (onCreate/…) that themselves show a dialog. */
+        val lifecycleDialogMethods: MutableSet<String> = mutableSetOf()
     }
+
+    /** Dialog-shower methods that are NOT lifecycle methods (i.e. helpers). */
+    internal fun helperDialogMethods(s: ClassSignals): List<MethodTarget> =
+        s.methodsToGut.filter { it.name !in LIFECYCLE_METHODS }
 
     /** Single-dex scan (used by tests). */
     fun scanDex(dexFile: DexFile, dexName: String): List<Detection> =
@@ -161,6 +183,9 @@ object Detector {
                     // Only void methods are safe to gut.
                     if (desc.endsWith(")V")) {
                         sig.methodsToGut.add(MethodTarget(type, method.name, desc))
+                        if (method.name in LIFECYCLE_METHODS) {
+                            sig.lifecycleDialogMethods.add(method.name)
+                        }
                     }
                 }
             }
@@ -211,6 +236,118 @@ object Detector {
         return hookSites
     }
 
+    /**
+     * Pass 2b (one dex): Tier B — startup hooks. Finds invokes to offline
+     * dialog-helper methods from lifecycle methods (onCreate/onStart/onResume).
+     * A custom dialog invoked there = shown at app start.
+     */
+    fun findStartupNops(
+        dexFile: DexFile,
+        helperTargets: Map<Pair<String, String>, MethodTarget>
+    ): List<ScopedNop> {
+        if (helperTargets.isEmpty()) return emptyList()
+        val nops = mutableListOf<ScopedNop>()
+        for (classDef in dexFile.classes) {
+            val callerType = classDef.type
+            if (isSkipped(callerType)) continue
+            for (method in classDef.methods) {
+                if (method.name !in LIFECYCLE_METHODS) continue
+                val impl = method.implementation ?: continue
+                val insns = impl.instructions.toList()
+                for (i in insns.indices) {
+                    val insn = insns[i]
+                    if (insn !is ReferenceInstruction) continue
+                    val ref = insn.reference
+                    if (ref !is MethodReference) continue
+                    if (ref.returnType != "V") continue
+                    if ((ref.definingClass to ref.name) !in helperTargets) continue
+                    val next = insns.getOrNull(i + 1)
+                    if (next != null && next.opcode.name.startsWith("MOVE_RESULT")) continue
+                    nops.add(ScopedNop(callerType, method.name, ref.definingClass, ref.name))
+                }
+            }
+        }
+        return nops
+    }
+
+    /**
+     * Pass 2c (one dex): Tier C — inline startup dialogs. Finds direct
+     * `Dialog.show()` / `AlertDialog.Builder.show()` invokes inside lifecycle
+     * methods (dialog code written inline in onCreate, no helper method).
+     * Only the show call is silenced; everything else in onCreate is untouched.
+     */
+    fun findInlineNops(dexFile: DexFile): List<ScopedNop> {
+        val nops = mutableListOf<ScopedNop>()
+        for (classDef in dexFile.classes) {
+            val callerType = classDef.type
+            if (isSkipped(callerType)) continue
+            for (method in classDef.methods) {
+                if (method.name !in LIFECYCLE_METHODS) continue
+                val impl = method.implementation ?: continue
+                val insns = impl.instructions.toList()
+                for (i in insns.indices) {
+                    val insn = insns[i]
+                    if (insn !is ReferenceInstruction) continue
+                    val ref = insn.reference
+                    if (ref !is MethodReference) continue
+                    if ((ref.definingClass to ref.name) !in INLINE_SHOW_TARGETS) continue
+                    val next = insns.getOrNull(i + 1)
+                    if (next != null && next.opcode.name.startsWith("MOVE_RESULT")) continue
+                    nops.add(ScopedNop(callerType, method.name, ref.definingClass, ref.name))
+                }
+            }
+        }
+        return nops
+    }
+
+    /** (class, method) -> target for Tier B offline dialog helpers. */
+    internal fun startupTargets(
+        signals: Map<String, ClassSignals>,
+        excludeClasses: Set<String>
+    ): Map<Pair<String, String>, MethodTarget> =
+        signals
+            .filterKeys { it !in excludeClasses }
+            .flatMap { (cls, s) -> helperDialogMethods(s).map { (cls to it.name) to it } }
+            .toMap()
+
+    /** Assemble Tier B/C detections from scoped nops, grouped by dialog class. */
+    internal fun buildStartupDetections(
+        signals: Map<String, ClassSignals>,
+        startupNops: List<ScopedNop>,
+        inlineNops: List<ScopedNop>
+    ): List<Detection> {
+        // Tier B: group startup nops by the helper (target) class.
+        val byHelper = startupNops.groupBy { it.targetClass }
+        val tierB = byHelper.map { (helperCls, nops) ->
+            val dex = signals[helperCls]?.dexName ?: ""
+            Detection(
+                classType = helperCls,
+                badges = setOf(Badge.DIALOG, Badge.STARTUP),
+                methodsToGut = emptyList(),
+                hookSites = emptyList(),
+                confidence = 0.9,
+                sourceDex = dex,
+                scopedNops = nops.distinct()
+            )
+        }
+        // Tier C: group inline nops by the caller (activity) class.
+        val byCaller = inlineNops.groupBy { it.callerClass }
+        val tierC = byCaller
+            .filterKeys { it !in byHelper.keys }
+            .map { (callerCls, nops) ->
+                Detection(
+                    classType = callerCls,
+                    badges = setOf(Badge.DIALOG, Badge.STARTUP),
+                    methodsToGut = emptyList(),
+                    hookSites = emptyList(),
+                    confidence = 0.85,
+                    sourceDex = "",
+                    scopedNops = nops.distinct()
+                )
+            }
+        return tierB + tierC
+    }
+
     /** Assemble final detections from confirmed candidates + collected hook sites. */
     internal fun buildDetections(
         candidates: Map<String, ClassSignals>,
@@ -234,22 +371,30 @@ object Detector {
         }
 
     /**
-     * Multi-dex scan: candidates are collected across ALL dex files first,
-     * then hook call sites are searched across ALL dex files. This catches
-     * hooks that live in a different classesN.dex than the injected class.
+     * Multi-dex scan with three tiers:
+     *  - Tier A (REMOTE): dialog + network signals (injected update-dialog).
+     *  - Tier B (STARTUP): offline dialog helper invoked from onCreate/onStart/onResume.
+     *  - Tier C (STARTUP): dialog shown inline inside onCreate/onStart/onResume.
      *
-     * NOTE: for large APKs prefer the one-dex-at-a-time passes
-     * ([collectSignals]/[findHookSites]) via [Engine.scan] to bound memory.
+     * NOTE: for large APKs prefer the one-dex-at-a-time passes via [Engine.scan]
+     * to bound memory.
      */
     fun scanMultiDex(dexFiles: Map<String, DexFile>): List<Detection> {
         val signals = mutableMapOf<String, ClassSignals>()
         for ((dexName, dexFile) in dexFiles) {
             collectSignals(dexFile, dexName, signals)
         }
-        val candidates = confirmCandidates(signals)
-        if (candidates.isEmpty()) return emptyList()
-        val gutByClassName = gutIndex(candidates)
+        // Tier A: remote-controlled.
+        val candidatesA = confirmCandidates(signals)
+        val gutByClassName = gutIndex(candidatesA)
         val hookSites = dexFiles.flatMap { (_, dexFile) -> findHookSites(dexFile, gutByClassName) }
-        return buildDetections(candidates, hookSites)
+        val detectionsA = buildDetections(candidatesA, hookSites)
+        // Tier B: offline helper hooked at startup (skip classes already Tier A).
+        val targetsB = startupTargets(signals, candidatesA.keys)
+        val startupNops = dexFiles.flatMap { (_, dexFile) -> findStartupNops(dexFile, targetsB) }
+        // Tier C: inline dialog.show() at startup.
+        val inlineNops = dexFiles.flatMap { (_, dexFile) -> findInlineNops(dexFile) }
+        val detectionsBC = buildStartupDetections(signals, startupNops, inlineNops)
+        return detectionsA + detectionsBC
     }
 }
