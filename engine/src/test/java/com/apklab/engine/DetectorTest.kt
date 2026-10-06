@@ -267,6 +267,22 @@ class DetectorTest {
     }
 
     @Test
+    fun `alertdialog helper hooked from onCreate is flagged STARTUP`() {
+        // The AlertDialog pattern from the user's script: new AlertDialog + show.
+        val helper = DexFixtures.TestClass(
+            "Lcom/app/AlertHelper;", listOf(DexFixtures.alertDialogMethod())
+        )
+        val main = DexFixtures.TestClass(
+            "Lcom/app/MainActivity;",
+            listOf(DexFixtures.mainOnCreateCalling("Lcom/app/AlertHelper;", "showAlert"))
+        )
+        val (_, dets) = scanOf(helper, main)
+        assertEquals(1, dets.size)
+        assertTrue(dets[0].badges.contains(Badge.STARTUP))
+        assertEquals(1, dets[0].scopedNops.size)
+    }
+
+    @Test
     fun `offline dialog called from click handler is not flagged`() {
         val helper = DexFixtures.TestClass(
             "Lcom/app/WelcomeDialog;", listOf(DexFixtures.offlineDialogMethod())
