@@ -14,6 +14,7 @@
         android:label="ApkLab"
         android:theme="@style/Theme.ApkLab"
         android:allowBackup="false"
+        android:largeHeap="true"
         android:supportsRtl="true">
         <activity
             android:name=".MainActivity"
