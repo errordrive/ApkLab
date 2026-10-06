@@ -73,6 +73,18 @@ object Detector {
 
     private const val DIALOG_TYPE = "Landroid/app/Dialog;"
 
+    /**
+     * All dialog types that count for Tier 1. AlertDialog extends Dialog but
+     * appears as its own type reference in bytecode — a dialog built via
+     * `new AlertDialog.Builder(...).show()` would otherwise slip through.
+     */
+    private val DIALOG_TYPES = setOf(
+        "Landroid/app/Dialog;",
+        "Landroid/app/AlertDialog;",
+        "Landroidx/appcompat/app/AlertDialog;",
+        "Landroid/app/ProgressDialog;"
+    )
+
     private val TIER1_DIALOG_METHODS = setOf(
         "show", "dismiss", "setContentView", "setCancelable",
         "setCanceledOnTouchOutside", "requestWindowFeature",
@@ -101,6 +113,8 @@ object Detector {
      */
     private val INLINE_SHOW_TARGETS = setOf(
         "Landroid/app/Dialog;" to "show",
+        "Landroid/app/AlertDialog;" to "show",
+        "Landroidx/appcompat/app/AlertDialog;" to "show",
         "Landroid/app/AlertDialog\$Builder;" to "show",
         "Landroidx/appcompat/app/AlertDialog\$Builder;" to "show",
         // Legacy managed dialogs: Activity.showDialog(id)
@@ -164,14 +178,14 @@ object Detector {
                     if (insn !is ReferenceInstruction) continue
                     when (val ref = insn.reference) {
                         is TypeReference -> {
-                            if (ref.type == DIALOG_TYPE) {
+                            if (ref.type in DIALOG_TYPES) {
                                 sig.tier1 = true
                                 if (insn.opcode == Opcode.NEW_INSTANCE) dialogShow = true
                             }
                             if (ref.type in TIER2_TYPES) sig.tier2 = true
                         }
                         is MethodReference -> {
-                            if (ref.definingClass == DIALOG_TYPE && ref.name in TIER1_DIALOG_METHODS) {
+                            if (ref.definingClass in DIALOG_TYPES && ref.name in TIER1_DIALOG_METHODS) {
                                 sig.tier1 = true
                                 if (ref.name == "show") dialogShow = true
                             }
