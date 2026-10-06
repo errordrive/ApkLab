@@ -199,11 +199,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val result = Engine.scan(file) { line ->
                     _state.update { it.copy(scanLog = (it.scanLog + line).takeLast(200)) }
                 }
+                // Defensive: one card per class, even if a dex quirk ever
+                // produced the same class twice.
+                val deduped = result.copy(
+                    detections = result.detections.distinctBy { it.classType }
+                )
                 _state.update {
                     it.copy(
                         scanning = false,
-                        scanResult = result,
-                        selected = result.detections.map { d -> d.classType }.toSet(),
+                        scanResult = deduped,
+                        selected = deduped.detections.map { d -> d.classType }.toSet(),
                     )
                 }
             } catch (e: Exception) {
