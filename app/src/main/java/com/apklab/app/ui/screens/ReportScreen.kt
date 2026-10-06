@@ -2,6 +2,7 @@ package com.apklab.app.ui.screens
 
 import android.content.Intent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -107,11 +108,7 @@ fun ReportScreen(vm: AppViewModel, state: UiState) {
             SectionTitle("Findings (${report.detections.size})")
             report.detections.forEach { d ->
                 AppCard(modifier = Modifier.padding(bottom = 12.dp)) {
-                    Text(
-                        prettyClass(d.classType),
-                        fontSize = 11.5.sp, fontWeight = FontWeight.Bold,
-                        color = c.ink, fontFamily = FontFamily.Monospace, lineHeight = 17.sp,
-                    )
+                    CodeLine(prettyClass(d.classType), bold = true)
                     Row(modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)) {
                         if (Badge.DIALOG in d.badges) {
                             StatusPill("DIALOG", c.primarySoft, c.primary)
@@ -126,10 +123,7 @@ fun ReportScreen(vm: AppViewModel, state: UiState) {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 6.dp)) {
                             Box(Modifier.size(8.dp).clip(RoundedCornerShape(999.dp)).background(c.danger))
                             Spacer(Modifier.width(10.dp))
-                            Text(
-                                "${m.name}(${m.descriptor.substringAfter('(')}",
-                                fontSize = 11.5.sp, fontFamily = FontFamily.Monospace, color = c.ink,
-                            )
+                            CodeLine("${m.name}(${m.descriptor.substringAfter('(')}")
                         }
                     }
                     Text("Hook calls to nop", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = c.inkSoft, modifier = Modifier.padding(top = 6.dp, bottom = 6.dp))
@@ -140,10 +134,7 @@ fun ReportScreen(vm: AppViewModel, state: UiState) {
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 6.dp)) {
                                 Box(Modifier.size(8.dp).clip(RoundedCornerShape(999.dp)).background(c.amber))
                                 Spacer(Modifier.width(10.dp))
-                                Text(
-                                    "${prettyClass(h.callerClass).substringAfterLast('.')}.${h.callerMethod} → ${h.target.name}()",
-                                    fontSize = 11.5.sp, fontFamily = FontFamily.Monospace, color = c.ink,
-                                )
+                                CodeLine("${prettyClass(h.callerClass).substringAfterLast('.')}.${h.callerMethod} → ${h.target.name}()")
                             }
                         }
                     }
@@ -196,4 +187,26 @@ private fun InfoRow(label: String, value: String, last: Boolean = false) {
         Text(value, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = c.ink)
     }
     if (!last) Divider(color = c.line, thickness = 1.dp)
+}
+
+/**
+ * Single-line monospace code text that scrolls horizontally instead of
+ * wrapping mid-token (long JNI-style signatures stay readable).
+ */
+@Composable
+private fun CodeLine(text: String, bold: Boolean = false) {
+    val c = LocalApkLabColors.current
+    Text(
+        text,
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        fontSize = 11.5.sp,
+        fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
+        color = c.ink,
+        fontFamily = FontFamily.Monospace,
+        lineHeight = 17.sp,
+        softWrap = false,
+        maxLines = 1,
+    )
 }
