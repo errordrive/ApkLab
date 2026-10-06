@@ -98,6 +98,18 @@ object DexFixtures {
         )
     )
 
+    /** Offline dialog built via AlertDialog (the pattern from the user's script). */
+    fun alertDialogMethod(name: String = "showAlert"): TestMethod = TestMethod(
+        name = name,
+        params = listOf("Landroid/app/Activity;"),
+        impl = implOf(
+            newInstance("Landroidx/appcompat/app/AlertDialog;"),
+            invokeVirtual("Landroidx/appcompat/app/AlertDialog;", "setTitle", "V", listOf("Ljava/lang/CharSequence;")),
+            invokeVirtual("Landroidx/appcompat/app/AlertDialog;", "show"),
+            returnVoid()
+        )
+    )
+
     /** MainActivity.onCreate that calls a dialog helper (startup hook). */
     fun mainOnCreateCalling(helperCls: String, helperMethod: String): TestMethod = TestMethod(
         name = "onCreate",
