@@ -86,6 +86,42 @@ object DexFixtures {
         )
     )
 
+    /** Plain offline dialog helper — Tier 1 only, no network signals. */
+    fun offlineDialogMethod(name: String = "showWelcome"): TestMethod = TestMethod(
+        name = name,
+        params = listOf("Landroid/app/Activity;"),
+        impl = implOf(
+            newInstance("Landroid/app/Dialog;"),
+            invokeVirtual("Landroid/app/Dialog;", "setContentView", "V", listOf("I")),
+            invokeVirtual("Landroid/app/Dialog;", "show"),
+            returnVoid()
+        )
+    )
+
+    /** MainActivity.onCreate that calls a dialog helper (startup hook). */
+    fun mainOnCreateCalling(helperCls: String, helperMethod: String): TestMethod = TestMethod(
+        name = "onCreate",
+        params = listOf("Landroid/os/Bundle;"),
+        access = 0x1,
+        impl = implOf(
+            invokeStatic(helperCls, helperMethod, "V", listOf("Landroid/app/Activity;")),
+            returnVoid()
+        )
+    )
+
+    /** MainActivity.onCreate with an inline dialog (no helper). */
+    fun mainOnCreateInlineDialog(): TestMethod = TestMethod(
+        name = "onCreate",
+        params = listOf("Landroid/os/Bundle;"),
+        access = 0x1,
+        impl = implOf(
+            newInstance("Landroid/app/Dialog;"),
+            invokeVirtual("Landroid/app/Dialog;", "setContentView", "V", listOf("I")),
+            invokeVirtual("Landroid/app/Dialog;", "show"),
+            returnVoid()
+        )
+    )
+
     fun buildDex(classes: List<TestClass>): DexFile {
         val classDefs: Set<ClassDef> = classes.map { tc ->
             ImmutableClassDef(
