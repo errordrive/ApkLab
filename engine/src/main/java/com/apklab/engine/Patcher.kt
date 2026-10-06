@@ -24,8 +24,8 @@ import java.io.File
 object Patcher {
 
     /**
-     * Rebuilds the dex with [gutTargets] gutted and [hookKeys] nopped.
-     * Hook keys are global (cross-dex): every dex file gets the nop pass.
+     * Rebuilds the dex with [gutTargets] gutted, [hookKeys] nopped globally,
+     * and [scopedNops] nopped only inside their specific caller methods.
      *
      * Returns the ORIGINAL [dexFile] instance when nothing changed, so the
      * caller can skip the expensive DexPool rewrite entirely (identity check
@@ -35,13 +35,14 @@ object Patcher {
     fun patchDex(
         dexFile: DexFile,
         gutTargets: List<MethodTarget>,
-        hookKeys: Set<Pair<String, String>>
+        hookKeys: Set<Pair<String, String>>,
+        scopedNops: Set<ScopedNop> = emptySet()
     ): DexFile {
         val gutKeys: Set<Triple<String, String, String>> = gutTargets
             .map { Triple(it.declaringClass, it.name, it.descriptor) }
             .toSet()
 
-        if (gutKeys.isEmpty() && hookKeys.isEmpty()) return dexFile
+        if (gutKeys.isEmpty() && hookKeys.isEmpty() && scopedNops.isEmpty()) return dexFile
 
         var anyChanged = false
         val newClasses: Set<ClassDef> = dexFile.classes.map { classDef ->
@@ -53,7 +54,7 @@ object Patcher {
                     m = gutMethod(method)
                     changed = true
                 }
-                val nopped = nopHooks(m, hookKeys)
+                val nopped = nopHooks(m, classDef.type, hookKeys, scopedNops)
                 if (nopped !== m) changed = true
                 nopped
             }
@@ -83,7 +84,8 @@ object Patcher {
         val hooks = detections
             .flatMap { d -> d.hookSites.map { it.target.declaringClass to it.target.name } }
             .toSet()
-        return patchDex(dexFile, gut, hooks)
+        val scoped = detections.flatMap { it.scopedNops }.toSet()
+        return patchDex(dexFile, gut, hooks, scoped)
     }
 
     fun writeDex(dexFile: DexFile, outFile: File) {
@@ -104,16 +106,29 @@ object Patcher {
         )
     }
 
-    private fun nopHooks(method: Method, hookKeys: Set<Pair<String, String>>): Method {
+    private fun nopHooks(
+        method: Method,
+        callerClass: String,
+        hookKeys: Set<Pair<String, String>>,
+        scopedNops: Set<ScopedNop>
+    ): Method {
         val impl = method.implementation ?: return method
-        if (hookKeys.isEmpty()) return method
+        if (hookKeys.isEmpty() && scopedNops.isEmpty()) return method
         val insns = impl.instructions.toList()
         var changed = false
         val newInsns = insns.mapIndexed { i, insn ->
             var out = insn
             if (insn is ReferenceInstruction && insn.reference is MethodReference) {
                 val mr = insn.reference as MethodReference
-                if (mr.returnType == "V" && (mr.definingClass to mr.name) in hookKeys) {
+                // Tier A: global hook to a gutted (void) method.
+                val globalHit = mr.returnType == "V" &&
+                    (mr.definingClass to mr.name) in hookKeys
+                // Tier B/C: scoped startup nop — only inside the recorded caller.
+                val scopedHit = scopedNops.any {
+                    it.callerClass == callerClass && it.callerMethod == method.name &&
+                        it.targetClass == mr.definingClass && it.targetMethod == mr.name
+                }
+                if (globalHit || scopedHit) {
                     val next = insns.getOrNull(i + 1)
                     if (next == null || !next.opcode.name.startsWith("MOVE_RESULT")) {
                         out = ImmutableInstruction10x(Opcode.NOP)
