@@ -26,6 +26,11 @@ object Patcher {
     /**
      * Rebuilds the dex with [gutTargets] gutted and [hookKeys] nopped.
      * Hook keys are global (cross-dex): every dex file gets the nop pass.
+     *
+     * Returns the ORIGINAL [dexFile] instance when nothing changed, so the
+     * caller can skip the expensive DexPool rewrite entirely (identity check
+     * with ===). This is what makes 100MB+ APKs patchable in reasonable time:
+     * only dex files that actually contain targets get rewritten.
      */
     fun patchDex(
         dexFile: DexFile,
@@ -38,6 +43,7 @@ object Patcher {
 
         if (gutKeys.isEmpty() && hookKeys.isEmpty()) return dexFile
 
+        var anyChanged = false
         val newClasses: Set<ClassDef> = dexFile.classes.map { classDef ->
             var changed = false
             val newMethods = classDef.methods.map { method ->
@@ -52,6 +58,7 @@ object Patcher {
                 nopped
             }
             if (changed) {
+                anyChanged = true
                 ImmutableClassDef(
                     classDef.type, classDef.accessFlags, classDef.superclass,
                     classDef.interfaces, classDef.sourceFile, classDef.annotations,
@@ -61,6 +68,8 @@ object Patcher {
                 classDef
             }
         }.toSet()
+
+        if (!anyChanged) return dexFile
 
         return object : DexFile {
             override fun getClasses(): Set<ClassDef> = newClasses
