@@ -184,10 +184,17 @@ fun AnalyzeScreen(vm: AppViewModel, state: UiState) {
                                             }
                                             if (Badge.REMOTE in d.badges) {
                                                 StatusPill("REMOTE", c.amberSoft, c.amber)
+                                                Spacer(Modifier.width(7.dp))
+                                            }
+                                            if (Badge.STARTUP in d.badges) {
+                                                StatusPill("STARTUP", c.purpleSoft, c.purple)
                                             }
                                         }
                                         Text(
-                                            "${d.methodsToGut.size} methods • ${d.hookSites.size} hook calls",
+                                            if (d.methodsToGut.isNotEmpty())
+                                                "${d.methodsToGut.size} methods • ${d.totalNops} hook calls"
+                                            else
+                                                "${d.totalNops} startup call(s) silenced",
                                             fontSize = 12.sp, color = c.muted,
                                             modifier = Modifier.padding(top = 8.dp),
                                         )
