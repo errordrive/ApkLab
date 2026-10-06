@@ -50,6 +50,7 @@ val genKeystore by tasks.registering(Exec::class) {
         "-keystore", outFile.absolutePath,
         "-alias", "apklab", "-keyalg", "RSA", "-keysize", "2048",
         "-validity", "10950", "-storepass", "android", "-keypass", "android",
+        "-storetype", "PKCS12",
         "-dname", "CN=ApkLab Debug, OU=ApkLab, O=ApkLab"
     )
     onlyIf { !outFile.exists() }
