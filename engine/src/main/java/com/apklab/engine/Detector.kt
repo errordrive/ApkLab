@@ -28,6 +28,50 @@ object Detector {
         "Lorg/xmlpull/", "Lcom/android/"
     )
 
+    /**
+     * Known legitimate third-party SDKs (ad networks, analytics, attribution).
+     * These ALWAYS use Dialog + network legitimately (interstitials, banners,
+     * remote config) and must NEVER be flagged — gutting them breaks the host
+     * app (crash on launch). An injected update-dialog lives in the app's own
+     * package or a shady new package, never inside these SDK namespaces.
+     */
+    private val SDK_DENYLIST_PREFIXES = listOf(
+        "Lcom/mbridge/",                 // Mbridge (Mintegral) ads
+        "Lcom/google/android/gms/ads/",  // AdMob / Google Mobile Ads
+        "Lcom/google/ads/",
+        "Lcom/facebook/ads/",            // Meta Audience Network
+        "Lcom/facebook/appevents/",
+        "Lcom/unity3d/ads/",             // Unity Ads
+        "Lcom/applovin/",               // AppLovin MAX
+        "Lcom/chartboost/",
+        "Lcom/inmobi/",
+        "Lcom/vungle/",
+        "Lcom/ironsource/",              // ironSource / Unity LevelPlay
+        "Lcom/tapjoy/",
+        "Lcom/startapp/",
+        "Lcom/mopub/",
+        "Lcom/amazon/device/ads/",
+        "Lcom/smaato/",
+        "Lcom/fyber/",
+        "Lcom/audiencenetwork/",
+        "Lcom/bytedance/sdk/",           // Pangle
+        "Lcom/kwai/sdk/",               // Kwai ads
+        "Lcom/liftoff/",
+        "Lcom/mintegral/",
+        "Lcom/yeahmobi/",
+        // Analytics / attribution / crash reporting (defensive)
+        "Lcom/google/firebase/",
+        "Lcom/appsflyer/",
+        "Lcom/adjust/",
+        "Lcom/singular/",
+        "Lcom/branch/",
+        "Lio/sentry/",
+        "Lcom/amplitude/",
+        "Lcom/mixpanel/",
+        "Lcom/crashlytics/",
+        "Lcom/flurry/",
+    )
+
     private const val DIALOG_TYPE = "Landroid/app/Dialog;"
 
     private val TIER1_DIALOG_METHODS = setOf(
@@ -48,6 +92,14 @@ object Detector {
 
     fun isAllowlisted(type: String): Boolean =
         ALLOWLIST_PREFIXES.any { type.startsWith(it) }
+
+    /** Known legitimate SDK (ad/analytics) — never flag, never patch. */
+    fun isKnownSdk(type: String): Boolean =
+        SDK_DENYLIST_PREFIXES.any { type.startsWith(it) }
+
+    /** Framework or known-SDK class: skip entirely. */
+    private fun isSkipped(type: String): Boolean =
+        isAllowlisted(type) || isKnownSdk(type)
 
     fun methodDescriptor(method: Method): String {
         val params = method.parameters.joinToString("") { it.type }
@@ -76,7 +128,7 @@ object Detector {
     ) {
         for (classDef in dexFile.classes) {
             val type = classDef.type
-            if (isAllowlisted(type)) continue
+            if (isSkipped(type)) continue
             val sig = out.getOrPut(type) { ClassSignals(dexName) }
             for (method in classDef.methods) {
                 val impl = method.implementation ?: continue
@@ -139,7 +191,7 @@ object Detector {
         val hookSites = mutableListOf<HookSite>()
         for (classDef in dexFile.classes) {
             val callerType = classDef.type
-            if (isAllowlisted(callerType)) continue
+            if (isSkipped(callerType)) continue
             for (method in classDef.methods) {
                 val impl = method.implementation ?: continue
                 val insns = impl.instructions.toList()
